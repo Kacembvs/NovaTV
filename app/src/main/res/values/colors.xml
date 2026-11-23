@@ -1,6 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="nova_navy">#FF080D1B</color>
-    <color name="nova_cyan">#FF36D9FF</color>
-    <color name="nova_violet">#FF8564FF</color>
+    <color name="nova_navy">#FF080D18</color>
+    <color name="nova_cyan">#FF43D5FF</color>
+    <color name="nova_violet">#FF8257FF</color>
 </resources>

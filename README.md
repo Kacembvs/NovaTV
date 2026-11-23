@@ -64,15 +64,39 @@ sur les pull requests et manuellement. Il installe le JDK 17, met Gradle en cach
 lance `./gradlew clean assembleDebug testDebugUnitTest` et publie l'APK dans l'artefact
 `nova-iptv-debug-apk`.
 
+## Architecture
+
+```
+app/src/main/java/com/nova/iptv/
+  NovaApp, AppContainer      Application + injection de dépendances manuelle
+  core/                      HTTP (OkHttp), chiffrement Keystore, utilitaires
+  domain/                    Modèles métier (types de profil/contenu, PlayableItem)
+  data/                      Profils, synchronisation progressive, préférences (DataStore)
+  data/db/                   Room : profils, contenus, favoris, historique
+  data/source/               Parseur M3U en streaming, client Xtream Codes
+  ui/                        Compose : navigation adaptative, accueil, TV, catalogues, séries, profils
+  player/                    Lecteur Media3 (ExoPlayer + HLS)
+```
+
 ## État du projet
 
-**Phase 1 — remise en ordre : terminée et vérifiée** (build debug et release réussis localement).
+Compilation debug vérifiée, 6 tests unitaires OK (parseur M3U, URLs Xtream). Parseur validé
+sur une playlist publique réelle (231 chaînes, 33 catégories).
 
-| Élément | État |
+| Fonction | État |
 |---|---|
-| Structure Gradle à la racine, wrapper, `.gitignore` | Fait |
-| Icône adaptative + bannière Android TV (depuis le logo) | Fait |
-| Lancement mobile (LAUNCHER) et TV (LEANBACK_LAUNCHER) | Fait |
-| Écran d'accueil Compose (aperçu visuel, aucune action) | Fait |
-| Workflow GitHub Actions | Écrit, à valider au premier push |
-| Navigation, profils, M3U/Xtream, Room, lecteur Media3, EPG, films/séries, autoplay | À faire (phases suivantes) |
+| Profils M3U/M3U8 et Xtream : ajouter, modifier, supprimer, actualiser, changer de profil | Fait |
+| Mot de passe Xtream chiffré (Android Keystore), jamais stocké en clair ni dans les URLs en base | Fait |
+| Chargement progressif par lots de 500 (navigation possible pendant la synchro) | Fait |
+| TV en direct : catégories, recherche, favoris, logos | Fait |
+| Films et séries : grilles d'affiches, catégories, recherche, favoris | Fait |
+| Séries Xtream : saisons, épisodes, progression par épisode | Fait |
+| Lecteur Media3 : HLS/TS/MP4/MKV, pistes audio, sous-titres, vitesse, plein écran | Fait |
+| Zapping : boutons précédent/suivant, flèches haut/bas, touches CH+/CH- | Fait |
+| Reprise de lecture (sauvegarde toutes les 30 s et à la fermeture) + « Recommencer » | Fait |
+| Reconnexion automatique du direct (3 tentatives), lecteur externe (VLC…) | Fait |
+| Accueil : reprendre, dernières chaînes, favoris (rangées masquées si vides) | Fait |
+| Navigation : barre inférieure (mobile), barre latérale + focus visible (TV) | Fait |
+| EPG XMLTV, autoplay épisode suivant + compte à rebours, minuteur sommeil | À faire |
+| Gestes luminosité/volume, verrouillage écran, thèmes, recommandations | À faire |
+| Tests instrumentés / sur Android TV réelle | À faire |
