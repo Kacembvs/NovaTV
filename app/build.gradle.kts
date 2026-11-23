@@ -21,8 +21,20 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    signingConfigs {
+        // Shared debug key (standard public "android" passwords) so CI and local
+        // debug APKs can be installed over each other. Not used for release builds.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
+            signingConfig = signingConfigs.getByName("debug")
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }

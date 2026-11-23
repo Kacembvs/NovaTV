@@ -48,6 +48,15 @@ Installation sur un appareil : `adb install -r app/build/outputs/apk/debug/app-d
 Hors Android Studio, créer un fichier `local.properties` (non versionné) contenant
 `sdk.dir=<chemin du SDK Android>`.
 
+## Télécharger l'APK (téléphone / TV)
+
+Lien direct, mis à jour automatiquement à chaque push sur `main` :
+
+https://github.com/kacemox/NOVA-IPTV-A/releases/download/latest-debug/nova-iptv-debug.apk
+
+Toutes les versions de debug sont signées avec la même clé (`app/debug.keystore`, clé de
+debug publique standard), ce qui permet d'installer une nouvelle version par-dessus l'ancienne.
+
 ## Intégration continue
 
 Le workflow `.github/workflows/main.yml` s'exécute à chaque push sur `main`/`master`,
