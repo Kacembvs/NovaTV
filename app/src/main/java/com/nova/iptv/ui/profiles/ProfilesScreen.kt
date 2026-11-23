@@ -52,6 +52,8 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
 
     fun setAutoplay(enabled: Boolean) = viewModelScope.launch { c.settings.setAutoplay(enabled) }
     fun setCountdown(seconds: Int) = viewModelScope.launch { c.settings.setCountdownSeconds(seconds) }
+    fun setGestures(enabled: Boolean) = viewModelScope.launch { c.settings.setGesturesEnabled(enabled) }
+    fun setFreeRotation(enabled: Boolean) = viewModelScope.launch { c.settings.setFreeRotation(enabled) }
     fun activate(id: Long) = viewModelScope.launch { c.profiles.setActive(id) }
     fun refresh(id: Long) = c.sync.sync(id)
     fun refreshGuide(id: Long) = c.epg.refresh(id)
@@ -79,7 +81,7 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
         modifier = Modifier.fillMaxSize(),
     ) {
         item { ScreenHeader("Réglages") }
-        item { PlaybackSettingsCard(playback, vm::setAutoplay, vm::setCountdown) }
+        item { PlaybackSettingsCard(playback, vm::setAutoplay, vm::setCountdown, vm::setGestures, vm::setFreeRotation) }
         item {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(end = 20.dp)) {
                 ScreenHeader("Profils IPTV", subtitle = "M3U / M3U8 et Xtream Codes", modifier = Modifier.weight(1f))
@@ -133,6 +135,8 @@ private fun PlaybackSettingsCard(
     settings: PlaybackSettings,
     onAutoplay: (Boolean) -> Unit,
     onCountdown: (Int) -> Unit,
+    onGestures: (Boolean) -> Unit,
+    onFreeRotation: (Boolean) -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
@@ -165,6 +169,18 @@ private fun PlaybackSettingsCard(
                     }
                 }
             }
+            SettingSwitch(
+                "Gestes luminosité / volume",
+                "Glisser à gauche : luminosité, à droite : volume. Double appui : ±10 s.",
+                settings.gesturesEnabled,
+                onGestures,
+            )
+            SettingSwitch(
+                "Rotation libre du lecteur",
+                "Désactivé : lecture en paysage uniquement.",
+                settings.freeRotation,
+                onFreeRotation,
+            )
             Text(
                 "Minuteur de sommeil : icône lune dans le lecteur (touche Menu sur la télécommande). " +
                     "Il est prioritaire sur la lecture automatique.",
@@ -172,6 +188,17 @@ private fun PlaybackSettingsCard(
                 fontSize = 12.sp,
             )
         }
+    }
+}
+
+@Composable
+private fun SettingSwitch(title: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 15.sp)
+            Text(description, color = NovaColors.TextSecondary, fontSize = 12.sp)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 

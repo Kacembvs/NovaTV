@@ -15,12 +15,18 @@ private val Context.dataStore by preferencesDataStore(name = "settings")
 data class PlaybackSettings(
     val autoplayNext: Boolean = true,
     val countdownSeconds: Int = PlaybackRules.DEFAULT_COUNTDOWN_SECONDS,
+    /** Mobile: vertical swipes for brightness (left) / volume (right), double tap to seek. */
+    val gesturesEnabled: Boolean = true,
+    /** false = landscape only, true = follows the device (portrait allowed). */
+    val freeRotation: Boolean = false,
 )
 
 class SettingsStore(private val context: Context) {
     private val activeProfileKey = longPreferencesKey("active_profile_id")
     private val autoplayKey = booleanPreferencesKey("autoplay_next")
     private val countdownKey = intPreferencesKey("autoplay_countdown_seconds")
+    private val gesturesKey = booleanPreferencesKey("player_gestures")
+    private val freeRotationKey = booleanPreferencesKey("player_free_rotation")
 
     val activeProfileId: Flow<Long?> = context.dataStore.data.map { it[activeProfileKey] }
 
@@ -28,7 +34,17 @@ class SettingsStore(private val context: Context) {
         PlaybackSettings(
             autoplayNext = prefs[autoplayKey] ?: true,
             countdownSeconds = prefs[countdownKey] ?: PlaybackRules.DEFAULT_COUNTDOWN_SECONDS,
+            gesturesEnabled = prefs[gesturesKey] ?: true,
+            freeRotation = prefs[freeRotationKey] ?: false,
         )
+    }
+
+    suspend fun setGesturesEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[gesturesKey] = enabled }
+    }
+
+    suspend fun setFreeRotation(enabled: Boolean) {
+        context.dataStore.edit { it[freeRotationKey] = enabled }
     }
 
     suspend fun setActiveProfile(id: Long?) {

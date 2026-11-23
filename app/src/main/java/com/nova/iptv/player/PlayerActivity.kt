@@ -2,8 +2,13 @@ package com.nova.iptv.player
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -25,15 +30,20 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import com.nova.iptv.NovaApp
 import com.nova.iptv.core.formatClock
+import com.nova.iptv.core.isTelevision
 import com.nova.iptv.data.PlaybackQueue
 import com.nova.iptv.data.db.HistoryEntity
 import com.nova.iptv.domain.ContentKind
@@ -47,51 +57,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-data class NextUp(val title: String, val subtitle: String?, val logo: String?, val secondsLeft: Int)
-
-data class EndScreen(val nextLabel: String?)
-
-data class PlayerUiState(
-    val title: String = "",
-    val subtitle: String? = null,
-    val kind: ContentKind = ContentKind.LIVE,
-    val controlsVisible: Boolean = false,
-    val bannerVisible: Boolean = false,
-    val error: String? = null,
-    val canZap: Boolean = false,
-    val resumeFromMs: Long? = null,
-    val nextUp: NextUp? = null,
-    val endScreen: EndScreen? = null,
-    val sleep: SleepMode = SleepMode.Off,
-    val sleepPanelVisible: Boolean = false,
-    val sleepStopped: Boolean = false,
-    /** Live only: current and next programme from the XMLTV guide. */
-    val programme: String? = null,
-    val nextProgramme: String? = null,
-) {
-    val isLive get() = kind == ContentKind.LIVE
-}
-
-interface PlayerActions {
-    fun back()
-    fun retry()
-    fun openExternal()
-    fun zapNext()
-    fun restart()
-    fun playNextNow()
-    fun cancelNextUp()
-    fun replay()
-    fun showSleepPanel(visible: Boolean)
-    fun setSleep(mode: SleepChoice)
-    fun resumeAfterSleep()
-}
-
-sealed interface SleepChoice {
-    data object Off : SleepChoice
-    data object EndOfItem : SleepChoice
-    data class Minutes(val minutes: Int) : SleepChoice
-}
+import kotlin.math.roundToInt
 
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity(), PlayerActions {
@@ -109,6 +75,9 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     private var nextUpJob: Job? = null
     private var sleepJob: Job? = null
     private var epgJob: Job? = null
+    private var infoJob: Job? = null
+    private var feedbackJob: Job? = null
+    private var gestureJob: Job? = null
 
     private var liveRetries = 0
     private val hlsFallbackTried = HashSet<Int>()
@@ -116,6 +85,13 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     private var countdownSeconds = PlaybackRules.DEFAULT_COUNTDOWN_SECONDS
     private var cancelledNextFor = -1
     private var endHandledFor = -1
+    private var topBarFocused = false
+
+    private var brightness = -1f
+    private var volumeLevel = -1f
+    private var droppedFrames = 0
+    private var loadStartedAt = 0L
+    private var startupMs: Long? = null
 
     private val isLiveQueue get() = session.items.firstOrNull()?.kind == ContentKind.LIVE
 
@@ -131,6 +107,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+        ui.update { it.copy(isTv = isTelevision()) }
 
         setContent {
             NovaTheme {
@@ -143,6 +120,12 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             container.settings.playback.collect {
                 autoplay = it.autoplayNext
                 countdownSeconds = it.countdownSeconds
+                ui.update { state -> state.copy(gesturesEnabled = it.gesturesEnabled) }
+                requestedOrientation = if (it.freeRotation) {
+                    ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                } else {
+                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                }
             }
         }
 
@@ -170,8 +153,9 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             .build()
         exo = exoPlayer
 
+        // The built-in controls keep play/pause, seek bar and previous/next; speed and tracks are
+        // handled by NOVA's own panels, so those commands are hidden from the default UI.
         val wrapped = object : ForwardingPlayer(exoPlayer) {
-            // Live streams have no meaningful position: previous/next always change channel.
             override fun seekToPrevious() {
                 if (isLiveQueue) seekToPreviousMediaItem() else super.seekToPrevious()
             }
@@ -179,6 +163,12 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             override fun seekToNext() {
                 if (isLiveQueue) seekToNextMediaItem() else super.seekToNext()
             }
+
+            override fun isCommandAvailable(command: Int): Boolean =
+                command !in HIDDEN_COMMANDS && super.isCommandAvailable(command)
+
+            override fun getAvailableCommands(): Player.Commands =
+                super.getAvailableCommands().buildUpon().removeAll(*HIDDEN_COMMANDS).build()
         }
         player = wrapped
         playerView?.player = wrapped
@@ -201,12 +191,18 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         }
 
         exoPlayer.addListener(listener)
+        exoPlayer.addAnalyticsListener(object : AnalyticsListener {
+            override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+                this@PlayerActivity.droppedFrames += droppedFrames
+            }
+        })
         if (isLiveQueue) {
             exoPlayer.repeatMode = Player.REPEAT_MODE_ALL
         } else {
             // We decide ourselves what happens at the end of each item (autoplay, sleep mode, end screen).
             exoPlayer.pauseAtEndOfMediaItems = true
         }
+        loadStartedAt = System.currentTimeMillis()
         exoPlayer.setMediaItems(session.items.indices.map { mediaItem(it) }, start, startPosition)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
@@ -229,6 +225,9 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             liveRetries = 0
             endHandledFor = -1
+            droppedFrames = 0
+            startupMs = null
+            loadStartedAt = System.currentTimeMillis()
             nextUpJob?.cancel()
             ui.update { it.copy(error = null, nextUp = null, endScreen = null) }
             updateTitle()
@@ -245,11 +244,18 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             when (playbackState) {
                 Player.STATE_READY -> {
                     liveRetries = 0
+                    if (startupMs == null) startupMs = System.currentTimeMillis() - loadStartedAt
                     ui.update { it.copy(error = null) }
                 }
                 Player.STATE_ENDED -> handleItemEnded()
                 else -> Unit
             }
+        }
+
+        override fun onTracksChanged(tracks: Tracks) = refreshTracks()
+
+        override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+            ui.update { it.copy(speed = playbackParameters.speed) }
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -277,6 +283,195 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         }
     }
 
+    // region Tracks, speed and quality
+
+    private fun refreshTracks() {
+        val p = exo ?: return
+        val groups = p.currentTracks.groups
+        fun options(type: Int, label: (androidx.media3.common.Format, Int) -> String): List<TrackOption> {
+            val result = ArrayList<TrackOption>()
+            groups.forEachIndexed { groupIndex, group ->
+                if (group.type != type) return@forEachIndexed
+                for (trackIndex in 0 until group.length) {
+                    if (!group.isTrackSupported(trackIndex)) continue
+                    result += TrackOption(
+                        label = label(group.getTrackFormat(trackIndex), result.size),
+                        selected = group.isTrackSelected(trackIndex),
+                        groupIndex = groupIndex,
+                        trackIndex = trackIndex,
+                    )
+                }
+            }
+            return result
+        }
+        val video = options(C.TRACK_TYPE_VIDEO) { format, _ -> TrackLabels.video(format) }
+            .sortedByDescending { groups[it.groupIndex].getTrackFormat(it.trackIndex).height }
+        ui.update {
+            it.copy(
+                audioTracks = options(C.TRACK_TYPE_AUDIO, TrackLabels::audio),
+                textTracks = options(C.TRACK_TYPE_TEXT, TrackLabels::text),
+                videoTracks = video,
+                qualityAuto = p.trackSelectionParameters.overrides.values.none { o -> o.type == C.TRACK_TYPE_VIDEO },
+            )
+        }
+    }
+
+    private fun selectTrack(type: Int, option: TrackOption?) {
+        val p = exo ?: return
+        val builder = p.trackSelectionParameters.buildUpon()
+        if (option == null) {
+            if (type == C.TRACK_TYPE_TEXT) builder.setTrackTypeDisabled(type, true)
+            else builder.clearOverridesOfType(type).setTrackTypeDisabled(type, false)
+        } else {
+            val group = p.currentTracks.groups.getOrNull(option.groupIndex) ?: return
+            builder.setTrackTypeDisabled(type, false)
+                .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, option.trackIndex))
+        }
+        p.trackSelectionParameters = builder.build()
+        ui.update { it.copy(panel = null) }
+        refreshTracks()
+    }
+
+    override fun selectAudio(option: TrackOption) = selectTrack(C.TRACK_TYPE_AUDIO, option)
+    override fun selectSubtitles(option: TrackOption?) = selectTrack(C.TRACK_TYPE_TEXT, option)
+    override fun selectQuality(option: TrackOption?) = selectTrack(C.TRACK_TYPE_VIDEO, option)
+
+    override fun setSpeed(speed: Float) {
+        exo?.setPlaybackSpeed(speed)
+        ui.update { it.copy(panel = null, speed = speed) }
+    }
+
+    // endregion
+
+    // region Panels, tech info, lock, gestures
+
+    override fun openPanel(panel: PlayerPanel?) {
+        infoJob?.cancel()
+        if (panel == PlayerPanel.INFO) {
+            infoJob = lifecycleScope.launch {
+                while (isActive) {
+                    ui.update { it.copy(techInfo = techInfo()) }
+                    delay(1_000)
+                }
+            }
+        }
+        if (panel != null) refreshTracks()
+        ui.update { it.copy(panel = panel) }
+    }
+
+    private fun techInfo(): List<Pair<String, String>> {
+        val p = exo ?: return emptyList()
+        val rows = ArrayList<Pair<String, String>>()
+        val index = p.currentMediaItemIndex
+        val url = urls.getOrNull(index).orEmpty()
+        val mime = p.currentMediaItem?.localConfiguration?.mimeType
+        rows += "Type de flux" to when {
+            mime == MimeTypes.APPLICATION_M3U8 || url.substringBefore('?').endsWith(".m3u8", true) -> "HLS (adaptatif)"
+            else -> "Progressif (" + url.substringBefore('?').substringAfterLast('.', "?").uppercase() + ")"
+        }
+        p.videoFormat?.let { v ->
+            val fps = if (v.frameRate > 0) String.format(java.util.Locale.FRANCE, " · %.0f i/s", v.frameRate) else ""
+            rows += "Vidéo" to listOfNotNull(TrackLabels.codec(v.sampleMimeType), if (v.width > 0) "${v.width}×${v.height}" else null)
+                .joinToString(" · ") + fps
+            TrackLabels.bitrate(v.bitrate)?.let { rows += "Débit vidéo" to it }
+        }
+        p.audioFormat?.let { a ->
+            rows += "Audio" to listOfNotNull(
+                TrackLabels.codec(a.sampleMimeType),
+                TrackLabels.channels(a.channelCount),
+                if (a.sampleRate > 0) "${a.sampleRate / 1000} kHz" else null,
+            ).joinToString(" · ")
+        }
+        rows += "Tampon" to String.format(java.util.Locale.FRANCE, "%.1f s", p.totalBufferedDuration / 1000f)
+        startupMs?.let { rows += "Démarrage" to "$it ms" }
+        rows += "Images perdues" to droppedFrames.toString()
+        rows += "Connexion" to connectionType()
+        rows += "État" to when (p.playbackState) {
+            Player.STATE_BUFFERING -> "Mise en mémoire tampon"
+            Player.STATE_READY -> if (p.isPlaying) "Lecture" else "Pause"
+            Player.STATE_ENDED -> "Terminé"
+            else -> "Inactif"
+        }
+        return rows
+    }
+
+    private fun connectionType(): String {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return "Inconnue"
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "Hors ligne"
+        return when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Données mobiles"
+            else -> "Autre"
+        }
+    }
+
+    override fun toggleLock() {
+        val locked = !ui.value.locked
+        playerView?.useController = !locked
+        if (locked) playerView?.hideController()
+        ui.update { it.copy(locked = locked, panel = null) }
+        Toast.makeText(this, if (locked) "Écran verrouillé" else "Écran déverrouillé", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun showControls() {
+        playerView?.showController()
+    }
+
+    override fun seekBy(deltaMs: Long) {
+        val p = exo ?: return
+        if (isLiveQueue || !p.isCurrentMediaItemSeekable) return
+        val duration = p.duration.takeIf { it != C.TIME_UNSET } ?: Long.MAX_VALUE
+        p.seekTo((p.currentPosition + deltaMs).coerceIn(0, duration))
+        feedbackJob?.cancel()
+        ui.update { it.copy(seekFeedback = (if (deltaMs > 0) "+" else "−") + "${kotlin.math.abs(deltaMs) / 1000} s") }
+        feedbackJob = lifecycleScope.launch {
+            delay(700)
+            ui.update { it.copy(seekFeedback = null) }
+        }
+    }
+
+    override fun adjustBrightness(delta: Float) {
+        if (brightness < 0) {
+            val current = window.attributes.screenBrightness
+            brightness = if (current >= 0) current else runCatching {
+                Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
+            }.getOrDefault(0.5f)
+        }
+        brightness = (brightness + delta).coerceIn(0.01f, 1f)
+        window.attributes = window.attributes.apply { screenBrightness = brightness }
+        showGesture(GestureKind.BRIGHTNESS, brightness)
+    }
+
+    override fun adjustVolume(delta: Float) {
+        val audio = getSystemService(AudioManager::class.java) ?: return
+        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (volumeLevel < 0) volumeLevel = audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max
+        volumeLevel = (volumeLevel + delta).coerceIn(0f, 1f)
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, (volumeLevel * max).roundToInt(), 0)
+        showGesture(GestureKind.VOLUME, volumeLevel)
+    }
+
+    private fun showGesture(kind: GestureKind, level: Float) {
+        gestureJob?.cancel()
+        ui.update { it.copy(gesture = GestureIndicator(kind, level)) }
+    }
+
+    override fun endGesture() {
+        volumeLevel = -1f
+        gestureJob?.cancel()
+        gestureJob = lifecycleScope.launch {
+            delay(800)
+            ui.update { it.copy(gesture = null) }
+        }
+    }
+
+    override fun onTopBarFocused(focused: Boolean) {
+        topBarFocused = focused
+    }
+
+    // endregion
+
     // region Autoplay / end of item
 
     private fun startMonitor() {
@@ -294,8 +489,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         val item = currentItem() ?: return
         val index = p.currentMediaItemIndex
         val duration = p.duration.takeIf { it != C.TIME_UNSET } ?: 0L
-        val countdownActive = nextUpJob?.isActive == true
-        if (countdownActive) {
+        if (nextUpJob?.isActive == true) {
             // The user seeked back well before the end: hide the proposal.
             if (duration > 0 && duration - p.currentPosition > (countdownSeconds + 5) * 1_000L) {
                 nextUpJob?.cancel()
@@ -386,10 +580,6 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
 
     // region Sleep mode
 
-    override fun showSleepPanel(visible: Boolean) {
-        ui.update { it.copy(sleepPanelVisible = visible) }
-    }
-
     override fun setSleep(mode: SleepChoice) {
         sleepJob?.cancel()
         val sleep = when (mode) {
@@ -407,7 +597,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         ui.update {
             it.copy(
                 sleep = sleep,
-                sleepPanelVisible = false,
+                panel = null,
                 nextUp = if (sleep == SleepMode.EndOfItem) null else it.nextUp,
             )
         }
@@ -426,7 +616,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         exo?.pause()
         saveProgress()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        ui.update { it.copy(sleep = SleepMode.Off, sleepStopped = true, nextUp = null, endScreen = null, sleepPanelVisible = false) }
+        ui.update { it.copy(sleep = SleepMode.Off, sleepStopped = true, nextUp = null, endScreen = null, panel = null) }
     }
 
     override fun resumeAfterSleep() {
@@ -458,11 +648,12 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     private fun configureView(view: PlayerView) {
         playerView = view
         view.player = player
-        view.setShowSubtitleButton(true)
+        view.setShowSubtitleButton(false)
         view.setShowNextButton(true)
         view.setShowPreviousButton(true)
         view.setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
         view.controllerShowTimeoutMs = 3_500
+        view.useController = !ui.value.locked
         view.setControllerVisibilityListener(
             PlayerView.ControllerVisibilityListener { visibility ->
                 ui.update { it.copy(controlsVisible = visibility == View.VISIBLE) }
@@ -546,6 +737,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             .setDataAndType(Uri.parse(url), "video/*")
             .putExtra("title", session.items[index].title)
         exo?.pause()
+        ui.update { it.copy(panel = null) }
         try {
             startActivity(Intent.createChooser(intent, "Ouvrir avec un lecteur externe"))
         } catch (e: ActivityNotFoundException) {
@@ -591,19 +783,32 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
+            val state = ui.value
             if (event.keyCode == KeyEvent.KEYCODE_MENU) {
-                showSleepPanel(true)
+                openPanel(PlayerPanel.OPTIONS)
                 return true
             }
-            val state = ui.value
-            val overlayOpen = state.error != null || state.nextUp != null || state.endScreen != null || state.sleepStopped
-            if (isLiveQueue && !overlayOpen) {
+            val overlayOpen = state.error != null || state.nextUp != null || state.endScreen != null ||
+                state.sleepStopped || state.panel != null
+            if (!overlayOpen && !state.locked) {
                 val controllerVisible = playerView?.isControllerFullyVisible == true
-                when (event.keyCode) {
-                    KeyEvent.KEYCODE_CHANNEL_UP -> { zap(+1); return true }
-                    KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
-                    KeyEvent.KEYCODE_DPAD_UP -> if (!controllerVisible) { zap(+1); return true }
-                    KeyEvent.KEYCODE_DPAD_DOWN -> if (!controllerVisible) { zap(-1); return true }
+                // Remote: from the seek bar (top of the default controls), UP reaches NOVA's top bar.
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && controllerVisible && currentFocus is DefaultTimeBar) {
+                    ui.update { it.copy(topBarFocusRequest = it.topBarFocusRequest + 1) }
+                    return true
+                }
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN && topBarFocused) {
+                    playerView?.showController()
+                    playerView?.requestFocus()
+                    return true
+                }
+                if (isLiveQueue && !topBarFocused) {
+                    when (event.keyCode) {
+                        KeyEvent.KEYCODE_CHANNEL_UP -> { zap(+1); return true }
+                        KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
+                        KeyEvent.KEYCODE_DPAD_UP -> if (!controllerVisible) { zap(+1); return true }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> if (!controllerVisible) { zap(-1); return true }
+                    }
                 }
             }
         }
@@ -631,6 +836,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         monitorJob?.cancel()
         nextUpJob?.cancel()
         sleepJob?.cancel()
+        infoJob?.cancel()
         playerView?.player = null
         exo?.removeListener(listener)
         exo?.release()
@@ -641,5 +847,6 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     private companion object {
         const val PROGRESS_SAVE_INTERVAL_MS = 30_000L
         const val MAX_LIVE_RETRIES = 3
+        val HIDDEN_COMMANDS = intArrayOf(Player.COMMAND_SET_SPEED_AND_PITCH, Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS)
     }
 }

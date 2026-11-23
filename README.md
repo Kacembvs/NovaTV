@@ -80,7 +80,7 @@ app/src/main/java/com/nova/iptv/
 
 ## État du projet
 
-Compilation debug vérifiée, 13 tests unitaires OK (parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, migration de base 1→2 sous Robolectric). Parseur validé
+Compilation debug vérifiée, 15 tests unitaires OK (parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, libellés pistes/vitesses, migration de base 1→2 sous Robolectric). Parseur validé
 sur une playlist publique réelle (231 chaînes, 33 catégories).
 
 | Fonction | État |
@@ -105,5 +105,9 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Association chaîne/EPG par tvg-id puis par nom (89/231 chaînes iptv-org FR retrouvées avec xmltvfr.fr) | Fait |
 | Programme en cours/suivant (liste des chaînes et lecteur), grille Guide TV 12 h | Fait |
 | Actualisation du guide après chaque synchro et au démarrage si > 12 h | Fait (sans WorkManager) |
-| Gestes luminosité/volume, verrouillage écran, thèmes, recommandations | À faire |
+| Panneaux NOVA translucides : audio, sous-titres, vitesse (0,5x→2x), qualité, minuteur, options | Fait |
+| Gestes mobiles : luminosité (gauche), volume (droite), double appui ±10 s, désactivables | Fait |
+| Verrouillage de l'écran, rotation configurable, informations techniques du flux | Fait |
+| Télécommande : touche Menu = options ; haut depuis la barre de progression = barre d'actions | Fait |
+| Thèmes, recommandations, fiche film, recherche globale | À faire |
 | Tests instrumentés / sur Android TV réelle | À faire |
