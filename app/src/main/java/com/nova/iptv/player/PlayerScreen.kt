@@ -58,6 +58,7 @@ fun PlayerScreen(state: PlayerUiState, onViewCreated: (PlayerView) -> Unit, acti
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { context -> PlayerView(context).also(onViewCreated) }, modifier = Modifier.fillMaxSize())
+        if (state.inPip) return@Box
 
         val blocking = state.error != null || state.endScreen != null || state.sleepStopped
         // Gestures only while the default controls are hidden, so their buttons stay tappable.

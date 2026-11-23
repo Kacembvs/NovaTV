@@ -80,7 +80,7 @@ app/src/main/java/com/nova/iptv/
 
 ## État du projet
 
-Compilation debug vérifiée, 18 tests unitaires OK (parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, libellés pistes/vitesses, recommandations, migrations de base 1→3 sous Robolectric). Parseur validé
+Compilation debug vérifiée, 21 tests unitaires OK (sauvegarde/restauration chiffrée, parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, libellés pistes/vitesses, recommandations, migrations de base 1→3 sous Robolectric). Parseur validé
 sur une playlist publique réelle (231 chaînes, 33 catégories).
 
 | Fonction | État |
@@ -117,5 +117,8 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Interface TV : barre latérale repliable (focus sur l'onglet actif), marges de sécurité | Fait |
 | Bannière d'accueil (recommandés / nouveautés / sélection aléatoire), rotation lente | Fait |
 | TV en direct en 3 zones (catégories, chaînes, aperçu vidéo + programme) sur TV et grand écran | Fait |
-| Thèmes, Picture-in-Picture, sauvegarde/restauration, contrôle parental | À faire |
+| Thèmes NOVA Blue, Cinema Gold, Stream Red, Pure Light, Personnalisé (accent) — changement immédiat | Fait |
+| Picture-in-Picture mobile (auto Android 12+, bouton lecture/pause), désactivable | Fait |
+| Sauvegarde/restauration JSON : profils, favoris, j'aime, reprises, réglages ; mots de passe chiffrés par code (PBKDF2 + AES-GCM) | Fait |
+| Contrôle parental, Google Cast, actualisation WorkManager, préférences de langue | À faire |
 | Tests instrumentés / sur Android TV réelle | À faire |

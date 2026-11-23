@@ -1,8 +1,21 @@
 package com.nova.iptv.player
 
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
 import android.content.ActivityNotFoundException
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.drawable.Icon
+import android.os.Build
+import android.util.Rational
+import androidx.annotation.RequiresApi
+import androidx.core.content.ContextCompat
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -86,6 +99,8 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     private var cancelledNextFor = -1
     private var endHandledFor = -1
     private var topBarFocused = false
+    private var pipEnabled = true
+    private var pipReceiver: BroadcastReceiver? = null
 
     private var brightness = -1f
     private var volumeLevel = -1f
@@ -101,6 +116,9 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             finish()
             return
         }
+        // Only one player at a time (e.g. a video still running in Picture-in-Picture).
+        active?.get()?.takeIf { it !== this }?.finish()
+        active = java.lang.ref.WeakReference(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
@@ -121,6 +139,8 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
                 autoplay = it.autoplayNext
                 countdownSeconds = it.countdownSeconds
                 ui.update { state -> state.copy(gesturesEnabled = it.gesturesEnabled) }
+                pipEnabled = it.pictureInPicture
+                updatePipParams()
                 requestedOrientation = if (it.freeRotation) {
                     ActivityInfo.SCREEN_ORIENTATION_FULL_USER
                 } else {
@@ -138,6 +158,8 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             }
             urls = withContext(Dispatchers.Default) { container.profiles.streamUrls(profile, session.items.map { it.ref }) }
             startPlayback()
+            registerPipReceiver()
+            updatePipParams()
         }
     }
 
@@ -253,6 +275,10 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         }
 
         override fun onTracksChanged(tracks: Tracks) = refreshTracks()
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) = updatePipParams()
+
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) = updatePipParams()
 
         override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
             ui.update { it.copy(speed = playbackParameters.speed) }
@@ -405,6 +431,90 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             else -> "Autre"
         }
     }
+
+    // region Picture-in-Picture (mobile)
+
+    private fun pipSupported(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !ui.value.isTv && pipEnabled &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    private fun canEnterPip(): Boolean {
+        val state = ui.value
+        return pipSupported() && exo?.isPlaying == true && !state.sleepStopped && state.error == null
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun pipParams(): PictureInPictureParams {
+        val size = exo?.videoSize
+        val ratio = if (size != null && size.width > 0 && size.height > 0) {
+            Rational(size.width, size.height).let { r ->
+                // Android only accepts ratios between 1:2.39 and 2.39:1.
+                val value = r.toFloat()
+                when {
+                    value > 2.39f -> Rational(239, 100)
+                    value < 1 / 2.39f -> Rational(100, 239)
+                    else -> r
+                }
+            }
+        } else {
+            Rational(16, 9)
+        }
+        val playing = exo?.isPlaying == true
+        val action = RemoteAction(
+            Icon.createWithResource(this, if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play),
+            if (playing) "Pause" else "Lecture",
+            if (playing) "Pause" else "Lecture",
+            PendingIntent.getBroadcast(
+                this,
+                0,
+                Intent(ACTION_PIP_TOGGLE).setPackage(packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            ),
+        )
+        return PictureInPictureParams.Builder()
+            .setAspectRatio(ratio)
+            .setActions(listOf(action))
+            .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setAutoEnterEnabled(canEnterPip()) }
+            .build()
+    }
+
+    private fun updatePipParams() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !pipSupported()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && ui.value.isTv.not()) {
+                runCatching { setPictureInPictureParams(PictureInPictureParams.Builder().setAutoEnterEnabled(false).build()) }
+            }
+            return
+        }
+        runCatching { setPictureInPictureParams(pipParams()) }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Android 12+ enters PiP automatically (setAutoEnterEnabled); older versions need an explicit call.
+        if (Build.VERSION.SDK_INT in Build.VERSION_CODES.O until Build.VERSION_CODES.S && canEnterPip()) {
+            runCatching { enterPictureInPictureMode(pipParams()) }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        playerView?.useController = !isInPictureInPictureMode && !ui.value.locked
+        if (isInPictureInPictureMode) playerView?.hideController()
+        ui.update { it.copy(inPip = isInPictureInPictureMode, panel = null) }
+    }
+
+    private fun registerPipReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val p = exo ?: return
+                if (p.isPlaying) p.pause() else p.play()
+            }
+        }
+        ContextCompat.registerReceiver(this, receiver, IntentFilter(ACTION_PIP_TOGGLE), ContextCompat.RECEIVER_NOT_EXPORTED)
+        pipReceiver = receiver
+    }
+
+    // endregion
 
     override fun toggleLock() {
         val locked = !ui.value.locked
@@ -834,6 +944,8 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
 
     override fun onDestroy() {
         super.onDestroy()
+        pipReceiver?.let { unregisterReceiver(it) }
+        pipReceiver = null
         monitorJob?.cancel()
         nextUpJob?.cancel()
         sleepJob?.cancel()
@@ -846,8 +958,10 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     }
 
     private companion object {
+        var active: java.lang.ref.WeakReference<PlayerActivity>? = null
         const val PROGRESS_SAVE_INTERVAL_MS = 30_000L
         const val MAX_LIVE_RETRIES = 3
+        const val ACTION_PIP_TOGGLE = "com.nova.iptv.PIP_TOGGLE"
         val HIDDEN_COMMANDS = intArrayOf(Player.COMMAND_SET_SPEED_AND_PITCH, Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS)
     }
 }

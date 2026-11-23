@@ -3,6 +3,7 @@ package com.nova.iptv
 import android.content.Context
 import com.nova.iptv.core.CredentialCipher
 import com.nova.iptv.core.NovaHttp
+import com.nova.iptv.data.BackupManager
 import com.nova.iptv.data.EpgManager
 import com.nova.iptv.data.LibraryRepository
 import com.nova.iptv.data.PlaybackQueue
@@ -25,10 +26,12 @@ class AppContainer(context: Context) {
     val http = NovaHttp.client()
     val db = NovaDatabase.create(appContext)
     val settings = SettingsStore(appContext)
-    val profiles = ProfileRepository(db.profileDao(), CredentialCipher(), settings)
+    val cipher = CredentialCipher()
+    val profiles = ProfileRepository(db.profileDao(), cipher, settings)
     val xtream = XtreamClient(http)
     val epg = EpgManager(db, profiles, http, appScope)
     val sync = SyncManager(db, profiles, http, xtream, appScope, onSynced = epg::refresh)
     val playbackQueue = PlaybackQueue()
     val library = LibraryRepository(db)
+    val backup = BackupManager(db, cipher, settings)
 }

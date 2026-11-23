@@ -23,6 +23,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.nova.iptv.AppContainer
+import android.content.Context
+import android.net.Uri
+import com.nova.iptv.core.toUserMessage
+import com.nova.iptv.data.BackupManager
+import com.nova.iptv.data.ThemeSettings
+import com.nova.iptv.ui.theme.NovaThemeId
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withContext
+import java.io.IOException
 import com.nova.iptv.data.EpgManager
 import com.nova.iptv.data.PlaybackSettings
 import com.nova.iptv.data.SyncManager
@@ -54,6 +65,78 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
     fun setCountdown(seconds: Int) = viewModelScope.launch { c.settings.setCountdownSeconds(seconds) }
     fun setGestures(enabled: Boolean) = viewModelScope.launch { c.settings.setGesturesEnabled(enabled) }
     fun setFreeRotation(enabled: Boolean) = viewModelScope.launch { c.settings.setFreeRotation(enabled) }
+    fun setPictureInPicture(enabled: Boolean) = viewModelScope.launch { c.settings.setPictureInPicture(enabled) }
+
+    val theme: StateFlow<ThemeSettings> = c.settings.theme
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeSettings())
+    fun setTheme(id: NovaThemeId, accent: Int? = null) = viewModelScope.launch { c.settings.setTheme(id, accent) }
+
+    /** Result / error of the last backup operation, shown in a snackbar-like message. */
+    val backupMessage = MutableStateFlow<String?>(null)
+    /** Restore waiting for the backup code (file content kept in memory only). */
+    val pendingRestore = MutableStateFlow<PendingRestore?>(null)
+
+    data class PendingRestore(val json: String, val error: String? = null)
+
+    fun export(context: Context, uri: Uri, code: String) {
+        viewModelScope.launch {
+            backupMessage.value = try {
+                val json = c.backup.export(code.ifEmpty { null })
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                        ?: throw IOException("Impossible d'écrire le fichier.")
+                }
+                if (code.isEmpty()) "Sauvegarde créée (sans mots de passe)." else "Sauvegarde créée, mots de passe chiffrés avec votre code."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                "Échec de la sauvegarde : ${e.toUserMessage()}"
+            }
+        }
+    }
+
+    fun openRestore(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            val json = try {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                } ?: throw IOException("Fichier illisible.")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                backupMessage.value = "Échec de la lecture : ${e.toUserMessage()}"
+                return@launch
+            }
+            restore(json, null)
+        }
+    }
+
+    fun restore(json: String, code: String?) {
+        viewModelScope.launch {
+            try {
+                val result = c.backup.restore(json, code)
+                pendingRestore.value = null
+                result.newProfileIds.forEach { c.sync.sync(it) }
+                backupMessage.value = buildString {
+                    append("Restauration terminée : ${result.profilesAdded} profil(s) ajouté(s)")
+                    if (result.profilesMerged > 0) append(", ${result.profilesMerged} déjà présent(s)")
+                    append(", ${result.favorites} favori(s), ${result.history} reprise(s), ${result.ratings} note(s).")
+                    if (result.missingPasswords > 0) {
+                        append(" ${result.missingPasswords} profil(s) Xtream sans mot de passe : modifiez-les pour le ressaisir.")
+                    }
+                }
+            } catch (e: BackupManager.CodeRequiredException) {
+                pendingRestore.value = PendingRestore(json)
+            } catch (e: BackupManager.WrongCodeException) {
+                pendingRestore.value = PendingRestore(json, "Code incorrect.")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                pendingRestore.value = null
+                backupMessage.value = "Échec de la restauration : ${e.toUserMessage()}"
+            }
+        }
+    }
     fun activate(id: Long) = viewModelScope.launch { c.profiles.setActive(id) }
     fun refresh(id: Long) = c.sync.sync(id)
     fun refreshGuide(id: Long) = c.epg.refresh(id)
@@ -72,6 +155,7 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
     val syncStates by vm.syncStates.collectAsStateWithLifecycle()
     val epgStates by vm.epgStates.collectAsStateWithLifecycle()
     val playback by vm.playback.collectAsStateWithLifecycle()
+    val theme by vm.theme.collectAsStateWithLifecycle()
     var toDelete by remember { mutableStateOf<ProfileEntity?>(null) }
 
     val list = profiles ?: return
@@ -81,7 +165,11 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
         modifier = Modifier.fillMaxSize(),
     ) {
         item { ScreenHeader("Réglages") }
-        item { PlaybackSettingsCard(playback, vm::setAutoplay, vm::setCountdown, vm::setGestures, vm::setFreeRotation) }
+        item { AppearanceCard(theme, vm::setTheme) }
+        item {
+            PlaybackSettingsCard(playback, vm::setAutoplay, vm::setCountdown, vm::setGestures, vm::setFreeRotation, vm::setPictureInPicture)
+        }
+        item { BackupCard(vm) }
         item {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(end = 20.dp)) {
                 ScreenHeader("Profils IPTV", subtitle = "M3U / M3U8 et Xtream Codes", modifier = Modifier.weight(1f))
@@ -137,6 +225,7 @@ private fun PlaybackSettingsCard(
     onCountdown: (Int) -> Unit,
     onGestures: (Boolean) -> Unit,
     onFreeRotation: (Boolean) -> Unit,
+    onPip: (Boolean) -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
@@ -180,6 +269,12 @@ private fun PlaybackSettingsCard(
                 "Désactivé : lecture en paysage uniquement.",
                 settings.freeRotation,
                 onFreeRotation,
+            )
+            SettingSwitch(
+                "Picture-in-Picture",
+                "Mobile : la vidéo continue dans une petite fenêtre quand vous quittez l'application.",
+                settings.pictureInPicture,
+                onPip,
             )
             Text(
                 "Minuteur de sommeil : icône lune dans le lecteur (touche Menu sur la télécommande). " +

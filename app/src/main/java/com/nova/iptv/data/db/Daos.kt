@@ -14,6 +14,9 @@ interface ProfileDao {
     @Query("SELECT * FROM profiles ORDER BY createdAt")
     fun observeAll(): Flow<List<ProfileEntity>>
 
+    @Query("SELECT * FROM profiles ORDER BY createdAt")
+    suspend fun all(): List<ProfileEntity>
+
     @Query("SELECT * FROM profiles WHERE id = :id")
     suspend fun get(id: Long): ProfileEntity?
 
@@ -206,4 +209,13 @@ interface LibraryDao {
 
     @Query("SELECT * FROM ratings WHERE profileId = :profileId")
     fun ratings(profileId: Long): Flow<List<RatingEntity>>
+
+    @Query("SELECT * FROM favorites")
+    suspend fun allFavorites(): List<FavoriteEntity>
+
+    @Query("SELECT * FROM history")
+    suspend fun allHistory(): List<HistoryEntity>
+
+    @Query("SELECT * FROM ratings")
+    suspend fun allRatings(): List<RatingEntity>
 }

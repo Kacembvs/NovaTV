@@ -33,6 +33,8 @@
             android:name=".player.PlayerActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:exported="false"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
             android:screenOrientation="sensorLandscape" />
     </application>
 </manifest>

@@ -10,16 +10,16 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Encrypts profile passwords with an AES-256/GCM key that never leaves the Android Keystore. */
-class CredentialCipher {
+class CredentialCipher : SecretBox {
 
-    fun encrypt(plain: String): String {
+    override fun encrypt(plain: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val payload = cipher.iv + cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
         return Base64.encodeToString(payload, Base64.NO_WRAP)
     }
 
-    fun decrypt(encoded: String): String {
+    override fun decrypt(encoded: String): String {
         val payload = Base64.decode(encoded, Base64.NO_WRAP)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, payload, 0, IV_SIZE))

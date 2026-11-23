@@ -1,6 +1,6 @@
 package com.nova.iptv.data
 
-import com.nova.iptv.core.CredentialCipher
+import com.nova.iptv.core.SecretBox
 import com.nova.iptv.data.db.ProfileDao
 import com.nova.iptv.data.db.ProfileEntity
 import com.nova.iptv.data.source.XtreamClient
@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.first
 
 class ProfileRepository(
     private val dao: ProfileDao,
-    private val cipher: CredentialCipher,
+    private val cipher: SecretBox,
     private val settings: SettingsStore,
 ) {
     val profiles: Flow<List<ProfileEntity>> = dao.observeAll()

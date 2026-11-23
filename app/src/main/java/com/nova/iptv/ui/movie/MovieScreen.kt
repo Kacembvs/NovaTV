@@ -167,7 +167,7 @@ fun MovieScreen(ref: String, onBack: () -> Unit, onOpenMovie: (String) -> Unit) 
                 ) {
                     item {
                         IconButton(onClick = onBack, modifier = Modifier.padding(8.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Retour", tint = Color.White)
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Retour", tint = NovaColors.TextPrimary)
                         }
                     }
                     item {

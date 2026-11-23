@@ -44,6 +44,8 @@ data class PlayerUiState(
     val seekFeedback: String? = null,
     /** Incremented to move the remote's focus to the top bar. */
     val topBarFocusRequest: Int = 0,
+    /** Mobile Picture-in-Picture window: only the video is drawn. */
+    val inPip: Boolean = false,
 ) {
     val isLive get() = kind == ContentKind.LIVE
 }
