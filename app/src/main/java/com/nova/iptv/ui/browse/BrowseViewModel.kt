@@ -17,10 +17,12 @@ import com.nova.iptv.data.db.ProfileEntity
 import com.nova.iptv.data.db.toPlayable
 import com.nova.iptv.domain.ContentKind
 import com.nova.iptv.ui.Playback
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class ProfileLoad(val loading: Boolean = true, val profile: ProfileEntity? = null)
 
@@ -50,6 +52,19 @@ class BrowseViewModel(private val c: AppContainer, val kind: ContentKind) : View
     val epg: StateFlow<Map<String, NowNext>> = profileId
         .flatMapLatest { id -> if (id == null || kind != ContentKind.LIVE) flowOf(emptyMap()) else c.epg.nowNext(id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** Live TV (3-zone layout): channel shown in the preview pane. */
+    val preview = MutableStateFlow<ContentEntity?>(null)
+
+    /** Resolved after a short delay so quickly scrolling through channels does not open every stream. */
+    val previewUrl: StateFlow<String?> = preview
+        .debounce(600)
+        .mapLatest { channel ->
+            if (channel == null) return@mapLatest null
+            val profile = c.profiles.get(channel.profileId) ?: return@mapLatest null
+            withContext(Dispatchers.Default) { c.profiles.streamUrls(profile, listOf(channel.streamRef)).firstOrNull() }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val items: Flow<PagingData<ContentEntity>> = combine(
         profileId,

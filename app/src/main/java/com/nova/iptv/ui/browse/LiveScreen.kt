@@ -15,7 +15,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import com.nova.iptv.core.isTelevision
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,6 +40,10 @@ import com.nova.iptv.ui.theme.NovaColors
 fun LiveScreen(onAddProfile: () -> Unit, onOpenGuide: () -> Unit) {
     val vm = novaViewModel(key = "live") { BrowseViewModel(it, ContentKind.LIVE) }
     val context = LocalContext.current
+    if (context.isTelevision() || LocalConfiguration.current.screenWidthDp >= 840) {
+        LiveTvLayout(vm, onOpenGuide, onAddProfile)
+        return
+    }
     val epg by vm.epg.collectAsStateWithLifecycle()
     BrowseScaffold(
         vm,

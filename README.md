@@ -114,5 +114,8 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Recommandations locales (j'aime, favoris, visionnages, je n'aime pas), sans serveur | Fait |
 | Accueil : séries en cours, coups de cœur, recommandés, nouveaux films/séries (Xtream) | Fait |
 | Recherche globale chaînes / films / séries | Fait |
-| Thèmes, vraie interface TV (bannière, 3 zones), Picture-in-Picture, sauvegarde | À faire |
+| Interface TV : barre latérale repliable (focus sur l'onglet actif), marges de sécurité | Fait |
+| Bannière d'accueil (recommandés / nouveautés / sélection aléatoire), rotation lente | Fait |
+| TV en direct en 3 zones (catégories, chaînes, aperçu vidéo + programme) sur TV et grand écran | Fait |
+| Thèmes, Picture-in-Picture, sauvegarde/restauration, contrôle parental | À faire |
 | Tests instrumentés / sur Android TV réelle | À faire |

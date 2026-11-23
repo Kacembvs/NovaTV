@@ -55,6 +55,8 @@ data class HomeState(
     val liked: List<RatingEntity> = emptyList(),
     val newMovies: List<ContentEntity> = emptyList(),
     val newSeries: List<ContentEntity> = emptyList(),
+    /** Large banner at the top of Home (recommendations / new titles, or a random pick). */
+    val featured: List<ContentEntity> = emptyList(),
 )
 
 private data class Discovery(
@@ -99,13 +101,24 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
                 ) { series, recommended, liked, newMovies, newSeries ->
                     Discovery(series, recommended, liked, newMovies, newSeries)
                 }
-                combine(base, discovery) { b, d ->
+                // Re-picked when the catalogue grows (e.g. during the first sync).
+                val randomPick = c.db.contentDao().kindCounts(profile.id)
+                    .map { counts -> counts.sumOf { it.count } / 500 }
+                    .distinctUntilChanged()
+                    .mapLatest { c.db.contentDao().randomFeatured(profile.id) }
+                combine(base, discovery, randomPick) { b, d, random ->
+                    val featured = (d.recommendations + d.newMovies + d.newSeries)
+                        .filter { it.logo != null && (it.kind == ContentKind.MOVIE || it.streamRef.isXtreamSeries()) }
+                        .distinctBy { it.streamRef }
+                        .take(6)
+                        .ifEmpty { random }
                     b.copy(
                         seriesInProgress = d.seriesInProgress,
                         recommendations = d.recommendations,
                         liked = d.liked,
                         newMovies = d.newMovies,
                         newSeries = d.newSeries,
+                        featured = featured,
                     )
                 }
             }
@@ -173,6 +186,21 @@ fun HomeScreen(
             is SyncManager.State.Running -> item { SyncBanner("Chargement de « ${profile.name} »… ${s.loaded} contenus", isError = false) }
             is SyncManager.State.Failed -> item { SyncBanner("Échec du chargement : ${s.message}", isError = true) }
             null -> if (profile.lastSyncError != null) item { SyncBanner("Dernière actualisation : ${profile.lastSyncError}", isError = true) }
+        }
+        if (state.featured.isNotEmpty()) {
+            item {
+                FeaturedBanner(
+                    items = state.featured,
+                    tv = tv,
+                    onWatch = { content ->
+                        if (content.streamRef.isXtreamSeries()) onOpenSeries(content.streamRef)
+                        else vm.playSingle(context, profile.id, content.toPlayable())
+                    },
+                    onDetails = { content ->
+                        if (content.kind == ContentKind.MOVIE) onOpenMovie(content.streamRef) else onOpenSeries(content.streamRef)
+                    },
+                )
+            }
         }
         item {
             Row(

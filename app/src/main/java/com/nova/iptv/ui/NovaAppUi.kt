@@ -1,6 +1,25 @@
 package com.nova.iptv.ui
 
 import android.net.Uri
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Settings
@@ -53,7 +72,8 @@ fun NovaAppUi() {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
-    val useRail = LocalContext.current.isTelevision() || LocalConfiguration.current.screenWidthDp >= 840
+    val tv = LocalContext.current.isTelevision()
+    val useRail = LocalConfiguration.current.screenWidthDp >= 840
 
     val goToTab: (String) -> Unit = { target ->
         nav.navigate(target) {
@@ -63,7 +83,13 @@ fun NovaAppUi() {
         }
     }
 
-    if (useRail) {
+    if (tv) {
+        // TV safe area (overscan) on the content side; the sidebar runs along the left edge.
+        Row(Modifier.fillMaxSize()) {
+            TvSidebar(route, goToTab)
+            NovaNavHost(nav, goToTab, Modifier.weight(1f).fillMaxHeight().padding(top = 24.dp, end = 40.dp, bottom = 16.dp))
+        }
+    } else if (useRail) {
         Row(Modifier.fillMaxSize().safeDrawingPadding()) {
             NavigationRail(containerColor = NovaColors.Background2) {
                 NovaLogo(Modifier.width(72.dp).padding(vertical = 12.dp))
@@ -96,6 +122,59 @@ fun NovaAppUi() {
             },
         ) { padding ->
             NovaNavHost(nav, goToTab, Modifier.padding(padding).consumeWindowInsets(padding))
+        }
+    }
+}
+
+/**
+ * Android TV side bar: collapsed to icons while browsing, expanded with labels when it has the focus.
+ * Entering it with the remote lands on the current tab.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun TvSidebar(route: String?, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val width by animateDpAsState(if (expanded) 230.dp else 88.dp, tween(180), label = "sidebar")
+    val requesters = remember { tabs.associate { it.route to FocusRequester() } }
+    val current = tabs.firstOrNull { it.route == route } ?: tabs.first()
+
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(width)
+            .background(Brush.horizontalGradient(listOf(NovaColors.Background2, NovaColors.Background)))
+            .onFocusChanged { expanded = it.hasFocus }
+            .focusProperties { enter = { requesters.getValue(current.route) } }
+            .focusGroup()
+            .padding(horizontal = 14.dp, vertical = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        NovaLogo(Modifier.width(if (expanded) 140.dp else 60.dp).padding(bottom = 20.dp))
+        tabs.forEach { tab ->
+            val selected = tab.route == route
+            var focused by remember { mutableStateOf(false) }
+            Surface(
+                onClick = { onSelect(tab.route) },
+                shape = RoundedCornerShape(14.dp),
+                color = when {
+                    focused -> NovaColors.Cyan.copy(alpha = 0.22f)
+                    selected -> NovaColors.Card
+                    else -> Color.Transparent
+                },
+                border = if (focused) BorderStroke(2.dp, NovaColors.Cyan) else null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(requesters.getValue(tab.route))
+                    .onFocusChanged { focused = it.isFocused },
+            ) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(tab.icon, contentDescription = tab.label, tint = if (selected || focused) NovaColors.Cyan else NovaColors.TextSecondary)
+                    if (expanded) {
+                        Spacer(Modifier.width(14.dp))
+                        Text(tab.label, fontSize = 16.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                    }
+                }
+            }
         }
     }
 }

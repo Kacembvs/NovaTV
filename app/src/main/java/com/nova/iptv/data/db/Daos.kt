@@ -126,6 +126,12 @@ interface ContentDao {
     )
     fun latest(profileId: Long, kind: ContentKind, limit: Int): Flow<List<ContentEntity>>
 
+    @Query(
+        "SELECT * FROM contents WHERE profileId = :profileId AND logo IS NOT NULL " +
+            "AND (kind = 'MOVIE' OR (kind = 'SERIES' AND streamRef LIKE 'xseries:%')) ORDER BY RANDOM() LIMIT 6"
+    )
+    suspend fun randomFeatured(profileId: Long): List<ContentEntity>
+
     @Query("SELECT * FROM contents WHERE profileId = :profileId AND streamRef IN (:refs)")
     suspend fun byRefs(profileId: Long, refs: List<String>): List<ContentEntity>
 
