@@ -46,6 +46,10 @@ data class PlayerUiState(
     val topBarFocusRequest: Int = 0,
     /** Mobile Picture-in-Picture window: only the video is drawn. */
     val inPip: Boolean = false,
+    /** Google Cast: button shown when available (phones), device name while casting. */
+    val castAvailable: Boolean = false,
+    val castDevice: String? = null,
+    val castPlaying: Boolean = false,
 ) {
     val isLive get() = kind == ContentKind.LIVE
 }
@@ -79,4 +83,6 @@ interface PlayerActions {
     fun adjustVolume(delta: Float)
     fun endGesture()
     fun onTopBarFocused(focused: Boolean)
+    fun castTogglePlayback()
+    fun stopCasting()
 }

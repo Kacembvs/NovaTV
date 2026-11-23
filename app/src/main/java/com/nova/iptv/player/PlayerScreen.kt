@@ -41,6 +41,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.ui.PlayerView
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.framework.CastButtonFactory
 import com.nova.iptv.core.formatDuration
 import com.nova.iptv.domain.ContentKind
 import com.nova.iptv.ui.components.ContentImage
@@ -114,6 +116,7 @@ fun PlayerScreen(state: PlayerUiState, onViewCreated: (PlayerView) -> Unit, acti
         }
 
         state.endScreen?.let { EndCard(state, it, actions) }
+        state.castDevice?.let { CastOverlay(state, it, actions) }
         state.error?.let { ErrorCard(state, it, actions) }
         if (state.sleepStopped) SleepStoppedScreen(actions)
         state.panel?.let { PanelDialog(it, state, actions) }
@@ -172,6 +175,12 @@ private fun TopBar(state: PlayerUiState, actions: PlayerActions, onFocusChanged:
             tint = if (state.sleep == SleepMode.Off) Color.White else NovaColors.Cyan,
         )
         BarButton(Icons.Rounded.Info, "Informations techniques", { actions.openPanel(PlayerPanel.INFO) })
+        if (state.castAvailable && !state.isTv) {
+            AndroidView(
+                factory = { ctx -> MediaRouteButton(ctx).also { CastButtonFactory.setUpMediaRouteButton(ctx.applicationContext, it) } },
+                modifier = Modifier.size(48.dp),
+            )
+        }
         if (!state.isTv) BarButton(Icons.Rounded.Lock, "Verrouiller l'écran", actions::toggleLock)
         BarButton(Icons.AutoMirrored.Rounded.OpenInNew, "Lecteur externe", actions::openExternal)
     }
@@ -547,6 +556,29 @@ private fun BoxScope.ErrorCard(state: PlayerUiState, message: String, actions: P
             if (state.isLive && state.canZap) OutlinedButton(onClick = actions::zapNext) { Text("Chaîne suivante") }
         }
         TextButton(onClick = actions::back) { Text("Fermer") }
+    }
+}
+
+@Composable
+private fun BoxScope.CastOverlay(state: PlayerUiState, device: String, actions: PlayerActions) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+        modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.9f)).padding(24.dp),
+    ) {
+        Icon(Icons.Rounded.Cast, contentDescription = null, tint = NovaColors.Cyan, modifier = Modifier.size(48.dp))
+        Text("Diffusion sur $device", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(state.subtitle ?: state.title, color = NovaColors.TextSecondary, fontSize = 14.sp, maxLines = 2)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = actions::castTogglePlayback) { Text(if (state.castPlaying) "Pause" else "Lecture") }
+            if (state.isLive && state.canZap) OutlinedButton(onClick = actions::zapNext) { Text("Chaîne suivante") }
+            OutlinedButton(onClick = actions::stopCasting) { Text("Arrêter la diffusion") }
+        }
+        Text(
+            "Si rien ne s'affiche sur le téléviseur, ce flux n'est pas compatible avec Chromecast.",
+            color = NovaColors.TextSecondary,
+            fontSize = 12.sp,
+        )
     }
 }
 

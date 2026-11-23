@@ -148,7 +148,7 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
                 backupMessage.value = buildString {
                     append("Restauration terminée : ${result.profilesAdded} profil(s) ajouté(s)")
                     if (result.profilesMerged > 0) append(", ${result.profilesMerged} déjà présent(s)")
-                    append(", ${result.favorites} favori(s), ${result.history} reprise(s), ${result.ratings} note(s).")
+                    append(", ${result.favorites} favori(s), ${result.history} reprise(s), ${result.ratings} note(s), ${result.customGroups} groupe(s).")
                     if (result.missingPasswords > 0) {
                         append(" ${result.missingPasswords} profil(s) Xtream sans mot de passe : modifiez-les pour le ressaisir.")
                     }

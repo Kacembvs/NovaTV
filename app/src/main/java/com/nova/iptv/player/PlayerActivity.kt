@@ -26,7 +26,8 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
+import com.nova.iptv.player.cast.CastController
 import androidx.activity.compose.setContent
 import androidx.annotation.OptIn
 import androidx.compose.runtime.getValue
@@ -74,7 +75,7 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @OptIn(UnstableApi::class)
-class PlayerActivity : ComponentActivity(), PlayerActions {
+class PlayerActivity : AppCompatActivity(), PlayerActions {
     private val container by lazy { (application as NovaApp).container }
     private lateinit var session: PlaybackQueue.Session
     private var urls: List<String> = emptyList()
@@ -160,6 +161,8 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             urls = withContext(Dispatchers.Default) { container.profiles.streamUrls(profile, session.items.map { it.ref }) }
             startPlayback()
             registerPipReceiver()
+            // Cast is only offered on phones/tablets; created once playback is ready to hand over.
+            if (!ui.value.isTv) cast = CastController(this@PlayerActivity, ContextCompat.getMainExecutor(this@PlayerActivity), castListener)
             updatePipParams()
         }
     }
@@ -261,6 +264,8 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             updateTitle()
             showBanner()
             refreshProgramme()
+            // Zapping / next episode while casting: send the new item to the TV.
+            if (cast?.isCasting == true) castCurrent()
             if (currentItem()?.kind == ContentKind.LIVE) saveProgress()
         }
 
@@ -595,6 +600,53 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     override fun onTopBarFocused(focused: Boolean) {
         topBarFocused = focused
     }
+
+    // region Google Cast
+
+    private var cast: CastController? = null
+
+    private val castListener = object : CastController.Listener {
+        override fun onCastAvailable(available: Boolean) {
+            ui.update { it.copy(castAvailable = available) }
+        }
+
+        override fun onCastStarted(deviceName: String) {
+            ui.update { it.copy(castDevice = deviceName, panel = null) }
+            castCurrent()
+        }
+
+        override fun onCastEnded(positionMs: Long) {
+            ui.update { it.copy(castDevice = null, castPlaying = false) }
+            val p = exo ?: return
+            if (currentItem()?.kind != ContentKind.LIVE && positionMs > 0) p.seekTo(positionMs)
+            p.playWhenReady = true
+        }
+
+        override fun onRemoteStatus(playing: Boolean) {
+            ui.update { it.copy(castPlaying = playing) }
+        }
+    }
+
+    /** Sends the current item to the Cast device and pauses the local player. */
+    private fun castCurrent() {
+        val p = exo ?: return
+        val index = p.currentMediaItemIndex
+        val item = session.items.getOrNull(index) ?: return
+        val url = urls.getOrNull(index) ?: return
+        saveProgress()
+        cast?.load(item, url, p.currentPosition)
+        p.pause()
+    }
+
+    override fun castTogglePlayback() {
+        cast?.togglePlayback()
+    }
+
+    override fun stopCasting() {
+        cast?.stop()
+    }
+
+    // endregion
 
     // endregion
 
@@ -945,7 +997,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     override fun onStart() {
         super.onStart()
         val state = ui.value
-        if (exo != null && !state.sleepStopped && state.endScreen == null) {
+        if (exo != null && !state.sleepStopped && state.endScreen == null && state.castDevice == null) {
             exo?.playWhenReady = true
             startProgressLoop()
         }
@@ -961,6 +1013,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     override fun onDestroy() {
         super.onDestroy()
         pipReceiver?.let { unregisterReceiver(it) }
+        cast?.release()
         pipReceiver = null
         monitorJob?.cancel()
         nextUpJob?.cancel()
