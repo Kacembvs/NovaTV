@@ -3,7 +3,7 @@ package com.nova.iptv.ui
 import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
@@ -42,7 +42,7 @@ private val tabs = listOf(
     Tab("live", "TV", Icons.Rounded.LiveTv),
     Tab("movies", "Films", Icons.Rounded.Movie),
     Tab("series", "Séries", Icons.Rounded.VideoLibrary),
-    Tab("profiles", "Profils", Icons.Rounded.AccountCircle),
+    Tab("profiles", "Réglages", Icons.Rounded.Settings),
 )
 
 @Composable

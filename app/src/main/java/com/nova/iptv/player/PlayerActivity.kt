@@ -47,19 +47,50 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+data class NextUp(val title: String, val subtitle: String?, val logo: String?, val secondsLeft: Int)
+
+data class EndScreen(val nextLabel: String?)
+
 data class PlayerUiState(
     val title: String = "",
     val subtitle: String? = null,
-    val isLive: Boolean = false,
+    val kind: ContentKind = ContentKind.LIVE,
     val controlsVisible: Boolean = false,
     val bannerVisible: Boolean = false,
     val error: String? = null,
     val canZap: Boolean = false,
     val resumeFromMs: Long? = null,
-)
+    val nextUp: NextUp? = null,
+    val endScreen: EndScreen? = null,
+    val sleep: SleepMode = SleepMode.Off,
+    val sleepPanelVisible: Boolean = false,
+    val sleepStopped: Boolean = false,
+) {
+    val isLive get() = kind == ContentKind.LIVE
+}
+
+interface PlayerActions {
+    fun back()
+    fun retry()
+    fun openExternal()
+    fun zapNext()
+    fun restart()
+    fun playNextNow()
+    fun cancelNextUp()
+    fun replay()
+    fun showSleepPanel(visible: Boolean)
+    fun setSleep(mode: SleepChoice)
+    fun resumeAfterSleep()
+}
+
+sealed interface SleepChoice {
+    data object Off : SleepChoice
+    data object EndOfItem : SleepChoice
+    data class Minutes(val minutes: Int) : SleepChoice
+}
 
 @OptIn(UnstableApi::class)
-class PlayerActivity : ComponentActivity() {
+class PlayerActivity : ComponentActivity(), PlayerActions {
     private val container by lazy { (application as NovaApp).container }
     private lateinit var session: PlaybackQueue.Session
     private var urls: List<String> = emptyList()
@@ -67,10 +98,19 @@ class PlayerActivity : ComponentActivity() {
     private var player: Player? = null
     private var playerView: PlayerView? = null
     private val ui = MutableStateFlow(PlayerUiState())
+
     private var progressJob: Job? = null
+    private var monitorJob: Job? = null
     private var bannerJob: Job? = null
+    private var nextUpJob: Job? = null
+    private var sleepJob: Job? = null
+
     private var liveRetries = 0
     private val hlsFallbackTried = HashSet<Int>()
+    private var autoplay = true
+    private var countdownSeconds = PlaybackRules.DEFAULT_COUNTDOWN_SECONDS
+    private var cancelledNextFor = -1
+    private var endHandledFor = -1
 
     private val isLiveQueue get() = session.items.firstOrNull()?.kind == ContentKind.LIVE
 
@@ -90,18 +130,14 @@ class PlayerActivity : ComponentActivity() {
         setContent {
             NovaTheme {
                 val state by ui.collectAsStateWithLifecycle()
-                PlayerScreen(
-                    state = state,
-                    onViewCreated = ::configureView,
-                    onBack = { finish() },
-                    onRetry = ::retry,
-                    onExternal = ::openExternal,
-                    onNext = { zap(+1) },
-                    onRestart = {
-                        player?.seekTo(0)
-                        ui.update { it.copy(resumeFromMs = null) }
-                    },
-                )
+                PlayerScreen(state = state, onViewCreated = ::configureView, actions = this@PlayerActivity)
+            }
+        }
+
+        lifecycleScope.launch {
+            container.settings.playback.collect {
+                autoplay = it.autoplayNext
+                countdownSeconds = it.countdownSeconds
             }
         }
 
@@ -160,12 +196,18 @@ class PlayerActivity : ComponentActivity() {
         }
 
         exoPlayer.addListener(listener)
-        if (isLiveQueue) exoPlayer.repeatMode = Player.REPEAT_MODE_ALL
+        if (isLiveQueue) {
+            exoPlayer.repeatMode = Player.REPEAT_MODE_ALL
+        } else {
+            // We decide ourselves what happens at the end of each item (autoplay, sleep mode, end screen).
+            exoPlayer.pauseAtEndOfMediaItems = true
+        }
         exoPlayer.setMediaItems(session.items.indices.map { mediaItem(it) }, start, startPosition)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
         updateTitle()
         startProgressLoop()
+        if (!isLiveQueue) startMonitor()
     }
 
     private fun mediaItem(index: Int, mimeType: String? = null): MediaItem {
@@ -181,16 +223,26 @@ class PlayerActivity : ComponentActivity() {
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             liveRetries = 0
-            ui.update { it.copy(error = null) }
+            endHandledFor = -1
+            nextUpJob?.cancel()
+            ui.update { it.copy(error = null, nextUp = null, endScreen = null) }
             updateTitle()
             showBanner()
             if (currentItem()?.kind == ContentKind.LIVE) saveProgress()
         }
 
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) handleItemEnded()
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_READY) {
-                liveRetries = 0
-                ui.update { it.copy(error = null) }
+            when (playbackState) {
+                Player.STATE_READY -> {
+                    liveRetries = 0
+                    ui.update { it.copy(error = null) }
+                }
+                Player.STATE_ENDED -> handleItemEnded()
+                else -> Unit
             }
         }
 
@@ -218,6 +270,167 @@ class PlayerActivity : ComponentActivity() {
             }
         }
     }
+
+    // region Autoplay / end of item
+
+    private fun startMonitor() {
+        monitorJob?.cancel()
+        monitorJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(500)
+                checkNextUp()
+            }
+        }
+    }
+
+    private fun checkNextUp() {
+        val p = exo ?: return
+        val item = currentItem() ?: return
+        val index = p.currentMediaItemIndex
+        val duration = p.duration.takeIf { it != C.TIME_UNSET } ?: 0L
+        val countdownActive = nextUpJob?.isActive == true
+        if (countdownActive) {
+            // The user seeked back well before the end: hide the proposal.
+            if (duration > 0 && duration - p.currentPosition > (countdownSeconds + 5) * 1_000L) {
+                nextUpJob?.cancel()
+                ui.update { it.copy(nextUp = null) }
+            }
+            return
+        }
+        val show = PlaybackRules.shouldShowNextUp(
+            kind = item.kind,
+            hasNext = p.hasNextMediaItem(),
+            autoplay = autoplay,
+            sleepAtEndOfItem = ui.value.sleep == SleepMode.EndOfItem,
+            cancelled = cancelledNextFor == index,
+            durationMs = duration,
+            positionMs = p.currentPosition,
+            countdownSeconds = countdownSeconds,
+        )
+        if (show) startCountdown(index)
+    }
+
+    private fun startCountdown(index: Int) {
+        val next = session.items.getOrNull(index + 1) ?: return
+        nextUpJob = lifecycleScope.launch {
+            var left = countdownSeconds
+            while (left > 0) {
+                ui.update { it.copy(nextUp = NextUp(next.title, next.subtitle, next.logo, left)) }
+                delay(1_000)
+                // The countdown freezes while the user has paused.
+                if (exo?.isPlaying == true) left--
+            }
+            playNextNow()
+        }
+    }
+
+    private fun handleItemEnded() {
+        val p = exo ?: return
+        val index = p.currentMediaItemIndex
+        if (endHandledFor == index) return
+        endHandledFor = index
+        val item = currentItem() ?: return
+        markFinished(item, p)
+        val action = PlaybackRules.onItemEnded(
+            sleepAtEndOfItem = ui.value.sleep == SleepMode.EndOfItem,
+            hasNext = p.hasNextMediaItem(),
+            autoplay = autoplay && item.kind == ContentKind.EPISODE,
+            nextCancelled = cancelledNextFor == index,
+        )
+        when (action) {
+            EndAction.SLEEP_STOP -> triggerSleep()
+            EndAction.PLAY_NEXT -> playNextNow()
+            EndAction.SHOW_END_SCREEN -> {
+                nextUpJob?.cancel()
+                val next = session.items.getOrNull(index + 1)?.takeIf { p.hasNextMediaItem() }
+                ui.update { it.copy(nextUp = null, endScreen = EndScreen(next?.let { n -> n.subtitle ?: n.title })) }
+            }
+        }
+    }
+
+    private fun markFinished(item: PlayableItem, p: Player) {
+        val duration = p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: return
+        saveHistory(item, duration, duration)
+    }
+
+    override fun playNextNow() {
+        nextUpJob?.cancel()
+        val p = exo ?: return
+        if (!p.hasNextMediaItem()) return
+        currentItem()?.let { markFinished(it, p) }
+        ui.update { it.copy(nextUp = null, endScreen = null) }
+        p.seekToNextMediaItem()
+        p.playWhenReady = true
+    }
+
+    override fun cancelNextUp() {
+        cancelledNextFor = exo?.currentMediaItemIndex ?: -1
+        nextUpJob?.cancel()
+        ui.update { it.copy(nextUp = null) }
+    }
+
+    override fun replay() {
+        ui.update { it.copy(endScreen = null) }
+        endHandledFor = -1
+        exo?.seekTo(0)
+        exo?.playWhenReady = true
+    }
+
+    // endregion
+
+    // region Sleep mode
+
+    override fun showSleepPanel(visible: Boolean) {
+        ui.update { it.copy(sleepPanelVisible = visible) }
+    }
+
+    override fun setSleep(mode: SleepChoice) {
+        sleepJob?.cancel()
+        val sleep = when (mode) {
+            SleepChoice.Off -> SleepMode.Off
+            SleepChoice.EndOfItem -> SleepMode.EndOfItem
+            is SleepChoice.Minutes -> SleepMode.Timer(System.currentTimeMillis() + mode.minutes * 60_000L, mode.minutes)
+        }
+        if (sleep is SleepMode.Timer) {
+            sleepJob = lifecycleScope.launch {
+                delay(sleep.minutes * 60_000L)
+                triggerSleep()
+            }
+        }
+        if (sleep == SleepMode.EndOfItem) nextUpJob?.cancel()
+        ui.update {
+            it.copy(
+                sleep = sleep,
+                sleepPanelVisible = false,
+                nextUp = if (sleep == SleepMode.EndOfItem) null else it.nextUp,
+            )
+        }
+        val message = when (sleep) {
+            SleepMode.Off -> "Minuteur de sommeil désactivé"
+            SleepMode.EndOfItem -> if (currentItem()?.kind == ContentKind.MOVIE) "Arrêt à la fin du film" else "Arrêt à la fin de l'épisode"
+            is SleepMode.Timer -> "Arrêt dans ${sleep.minutes} minutes"
+        }
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    /** Stops playback, saves progress and lets the screen turn off. */
+    private fun triggerSleep() {
+        nextUpJob?.cancel()
+        sleepJob?.cancel()
+        exo?.pause()
+        saveProgress()
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        ui.update { it.copy(sleep = SleepMode.Off, sleepStopped = true, nextUp = null, endScreen = null, sleepPanelVisible = false) }
+    }
+
+    override fun resumeAfterSleep() {
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        ui.update { it.copy(sleepStopped = false) }
+        val p = exo ?: return
+        if (p.playbackState == Player.STATE_ENDED || endHandledFor == p.currentMediaItemIndex) replay() else p.play()
+    }
+
+    // endregion
 
     private fun isNetworkError(error: PlaybackException) = error.errorCode in 2000..2999
 
@@ -256,12 +469,7 @@ class PlayerActivity : ComponentActivity() {
     private fun updateTitle() {
         val item = currentItem() ?: session.items[session.startIndex]
         ui.update {
-            it.copy(
-                title = item.title,
-                subtitle = item.subtitle,
-                isLive = item.kind == ContentKind.LIVE,
-                canZap = session.items.size > 1,
-            )
+            it.copy(title = item.title, subtitle = item.subtitle, kind = item.kind, canZap = session.items.size > 1)
         }
     }
 
@@ -282,13 +490,22 @@ class PlayerActivity : ComponentActivity() {
         p.playWhenReady = true
     }
 
-    private fun retry() {
+    override fun zapNext() = zap(+1)
+
+    override fun back() = finish()
+
+    override fun restart() {
+        exo?.seekTo(0)
+        ui.update { it.copy(resumeFromMs = null) }
+    }
+
+    override fun retry() {
         ui.update { it.copy(error = null) }
         exo?.prepare()
         exo?.playWhenReady = true
     }
 
-    private fun openExternal() {
+    override fun openExternal() {
         val index = exo?.currentMediaItemIndex ?: session.startIndex
         val url = urls.getOrNull(index) ?: return
         val intent = Intent(Intent.ACTION_VIEW)
@@ -302,7 +519,6 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    /** Reads the position on the main thread, writes on the app scope (survives the activity). */
     private fun saveProgress() {
         val p = exo ?: return
         val item = currentItem() ?: return
@@ -310,6 +526,11 @@ class PlayerActivity : ComponentActivity() {
         val position = if (live) 0L else p.currentPosition
         val duration = if (live || p.duration == C.TIME_UNSET) 0L else p.duration
         if (!live && position < 1_000) return
+        saveHistory(item, position, duration)
+    }
+
+    /** Values are read on the main thread; the write runs on the app scope so it survives the activity. */
+    private fun saveHistory(item: PlayableItem, position: Long, duration: Long) {
         val entry = HistoryEntity(
             profileId = session.profileId,
             itemKey = item.ref,
@@ -328,19 +549,28 @@ class PlayerActivity : ComponentActivity() {
         progressJob = lifecycleScope.launch {
             while (isActive) {
                 delay(PROGRESS_SAVE_INTERVAL_MS)
-                if (currentItem()?.kind != ContentKind.LIVE) saveProgress()
+                val p = exo
+                if (currentItem()?.kind != ContentKind.LIVE && p != null && p.isPlaying) saveProgress()
             }
         }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN && isLiveQueue && ui.value.error == null) {
-            val controllerVisible = playerView?.isControllerFullyVisible == true
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_CHANNEL_UP -> { zap(+1); return true }
-                KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
-                KeyEvent.KEYCODE_DPAD_UP -> if (!controllerVisible) { zap(+1); return true }
-                KeyEvent.KEYCODE_DPAD_DOWN -> if (!controllerVisible) { zap(-1); return true }
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            if (event.keyCode == KeyEvent.KEYCODE_MENU) {
+                showSleepPanel(true)
+                return true
+            }
+            val state = ui.value
+            val overlayOpen = state.error != null || state.nextUp != null || state.endScreen != null || state.sleepStopped
+            if (isLiveQueue && !overlayOpen) {
+                val controllerVisible = playerView?.isControllerFullyVisible == true
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_CHANNEL_UP -> { zap(+1); return true }
+                    KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
+                    KeyEvent.KEYCODE_DPAD_UP -> if (!controllerVisible) { zap(+1); return true }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> if (!controllerVisible) { zap(-1); return true }
+                }
             }
         }
         return super.dispatchKeyEvent(event)
@@ -348,7 +578,8 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (exo != null) {
+        val state = ui.value
+        if (exo != null && !state.sleepStopped && state.endScreen == null) {
             exo?.playWhenReady = true
             startProgressLoop()
         }
@@ -363,6 +594,9 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        monitorJob?.cancel()
+        nextUpJob?.cancel()
+        sleepJob?.cancel()
         playerView?.player = null
         exo?.removeListener(listener)
         exo?.release()

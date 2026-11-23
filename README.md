@@ -80,7 +80,7 @@ app/src/main/java/com/nova/iptv/
 
 ## État du projet
 
-Compilation debug vérifiée, 6 tests unitaires OK (parseur M3U, URLs Xtream). Parseur validé
+Compilation debug vérifiée, 10 tests unitaires OK (parseur M3U, URLs Xtream, règles autoplay/sommeil). Parseur validé
 sur une playlist publique réelle (231 chaînes, 33 catégories).
 
 | Fonction | État |
@@ -97,6 +97,10 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Reconnexion automatique du direct (3 tentatives), lecteur externe (VLC…) | Fait |
 | Accueil : reprendre, dernières chaînes, favoris (rangées masquées si vides) | Fait |
 | Navigation : barre inférieure (mobile), barre latérale + focus visible (TV) | Fait |
-| EPG XMLTV, autoplay épisode suivant + compte à rebours, minuteur sommeil | À faire |
+| Épisode suivant automatique : compte à rebours (5/10/15/20 s, défaut 20), « Lire maintenant » / « Annuler » | Fait |
+| Mode sommeil prioritaire : fin de l'épisode, fin du film, 15/30/45/60 min (arrêt + sauvegarde) | Fait |
+| Réglages de lecture (onglet Réglages) | Fait |
+| Saut automatique du générique | Non fait : aucune donnée fiable (chapitres) fournie par les flux IPTV |
+| EPG XMLTV | À faire |
 | Gestes luminosité/volume, verrouillage écran, thèmes, recommandations | À faire |
 | Tests instrumentés / sur Android TV réelle | À faire |

@@ -23,9 +23,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.nova.iptv.AppContainer
+import com.nova.iptv.data.PlaybackSettings
 import com.nova.iptv.data.SyncManager
 import com.nova.iptv.data.db.ProfileEntity
 import com.nova.iptv.domain.ProfileType
+import com.nova.iptv.player.PlaybackRules
 import com.nova.iptv.ui.components.EmptyState
 import com.nova.iptv.ui.components.ScreenHeader
 import com.nova.iptv.ui.novaViewModel
@@ -43,7 +45,11 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
     val activeId: StateFlow<Long?> = c.profiles.activeProfile.map { it?.id }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val syncStates = c.sync.states
+    val playback: StateFlow<PlaybackSettings> = c.settings.playback
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlaybackSettings())
 
+    fun setAutoplay(enabled: Boolean) = viewModelScope.launch { c.settings.setAutoplay(enabled) }
+    fun setCountdown(seconds: Int) = viewModelScope.launch { c.settings.setCountdownSeconds(seconds) }
     fun activate(id: Long) = viewModelScope.launch { c.profiles.setActive(id) }
     fun refresh(id: Long) = c.sync.sync(id)
     fun delete(id: Long) {
@@ -58,6 +64,7 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
     val profiles by vm.profiles.collectAsStateWithLifecycle()
     val activeId by vm.activeId.collectAsStateWithLifecycle()
     val syncStates by vm.syncStates.collectAsStateWithLifecycle()
+    val playback by vm.playback.collectAsStateWithLifecycle()
     var toDelete by remember { mutableStateOf<ProfileEntity?>(null) }
 
     val list = profiles ?: return
@@ -66,6 +73,8 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
+        item { ScreenHeader("Réglages") }
+        item { PlaybackSettingsCard(playback, vm::setAutoplay, vm::setCountdown) }
         item {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(end = 20.dp)) {
                 ScreenHeader("Profils IPTV", subtitle = "M3U / M3U8 et Xtream Codes", modifier = Modifier.weight(1f))
@@ -108,6 +117,54 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
             },
             dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Annuler") } },
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlaybackSettingsCard(
+    settings: PlaybackSettings,
+    onAutoplay: (Boolean) -> Unit,
+    onCountdown: (Int) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = NovaColors.Card,
+        border = androidx.compose.foundation.BorderStroke(1.dp, NovaColors.Border),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Lecture", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Épisode suivant automatique", fontSize = 15.sp)
+                    Text(
+                        "Propose l'épisode suivant avant la fin avec un compte à rebours.",
+                        color = NovaColors.TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Switch(checked = settings.autoplayNext, onCheckedChange = onAutoplay)
+            }
+            if (settings.autoplayNext) {
+                Text("Compte à rebours", color = NovaColors.TextSecondary, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PlaybackRules.COUNTDOWN_CHOICES.forEach { seconds ->
+                        FilterChip(
+                            selected = settings.countdownSeconds == seconds,
+                            onClick = { onCountdown(seconds) },
+                            label = { Text("$seconds s") },
+                        )
+                    }
+                }
+            }
+            Text(
+                "Minuteur de sommeil : icône lune dans le lecteur (touche Menu sur la télécommande). " +
+                    "Il est prioritaire sur la lecture automatique.",
+                color = NovaColors.TextSecondary,
+                fontSize = 12.sp,
+            )
+        }
     }
 }
 

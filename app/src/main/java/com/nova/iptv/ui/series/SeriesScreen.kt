@@ -191,9 +191,9 @@ fun SeriesScreen(ref: String, onBack: () -> Unit) {
                     if (episodes.isEmpty()) {
                         item { Text("Aucun épisode disponible.", color = NovaColors.TextSecondary) }
                     }
-                    itemsIndexed(episodes, key = { _, e -> e.id }) { index, episode ->
+                    items(episodes, key = { e -> e.id }) { episode ->
                         val history = progress[SeriesViewModel.episodeRef(episode)]
-                        NovaCard(onClick = { vm.play(context, s, episodes, index) }, modifier = Modifier.fillMaxWidth(), focusScale = 1.02f) {
+                        NovaCard(onClick = { vm.play(context, s, s.info.episodes, s.info.episodes.indexOf(episode)) }, modifier = Modifier.fillMaxWidth(), focusScale = 1.02f) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(SeriesViewModel.episodeLabel(episode), fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 if (history != null && history.durationMs > 0) {
