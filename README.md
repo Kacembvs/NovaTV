@@ -52,7 +52,7 @@ Hors Android Studio, créer un fichier `local.properties` (non versionné) conte
 
 Lien direct, mis à jour automatiquement à chaque push sur `main` :
 
-https://github.com/kacemox/NOVA-IPTV-A/releases/download/latest-debug/nova-iptv-debug.apk
+https://github.com/Kacembvs/NovaTV/releases/download/latest-debug/nova-iptv-debug.apk
 
 Toutes les versions de debug sont signées avec la même clé (`app/debug.keystore`, clé de
 debug publique standard), ce qui permet d'installer une nouvelle version par-dessus l'ancienne.
