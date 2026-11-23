@@ -36,6 +36,7 @@ import com.nova.iptv.ui.components.ContentImage
 import com.nova.iptv.ui.components.EmptyState
 import com.nova.iptv.ui.components.FavoriteButton
 import com.nova.iptv.ui.components.NovaCard
+import com.nova.iptv.ui.components.RatingButtons
 import com.nova.iptv.ui.novaViewModel
 import com.nova.iptv.ui.theme.NovaColors
 import kotlinx.coroutines.CancellationException
@@ -66,6 +67,16 @@ class SeriesViewModel(private val c: AppContainer, private val ref: String) : Vi
         .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else c.db.libraryDao().favoriteKeys(id) }
         .map { ref in it }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val rating: StateFlow<Int?> = profileId
+        .flatMapLatest { id -> if (id == null) flowOf(null) else c.library.rating(id, ref) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun rate(content: ContentEntity, value: Int) {
+        viewModelScope.launch {
+            c.library.rate(content.profileId, ref, ContentKind.SERIES, content.name, content.logo, value, rating.value)
+        }
+    }
 
     init { load() }
 
@@ -106,6 +117,7 @@ class SeriesViewModel(private val c: AppContainer, private val ref: String) : Vi
                 kind = ContentKind.EPISODE,
                 logo = cover,
                 subtitle = episodeLabel(episode),
+                parentKey = ref,
             )
         }
         Playback.start(context, c, loaded.content.profileId, items, index)
@@ -128,6 +140,7 @@ fun SeriesScreen(ref: String, onBack: () -> Unit) {
     val selectedSeason by vm.season.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
     val favorite by vm.isFavorite.collectAsStateWithLifecycle()
+    val rating by vm.rating.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     Column(Modifier.fillMaxSize()) {
@@ -167,6 +180,7 @@ fun SeriesScreen(ref: String, onBack: () -> Unit) {
                                         }
                                     }
                                     FavoriteButton(favorite, { vm.toggleFavorite(s.content) })
+                                    RatingButtons(rating) { vm.rate(s.content, it) }
                                 }
                             }
                         }

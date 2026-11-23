@@ -7,7 +7,13 @@ import com.nova.iptv.domain.PlayableItem
  * Binder limit of an Intent).
  */
 class PlaybackQueue {
-    data class Session(val profileId: Long, val items: List<PlayableItem>, val startIndex: Int)
+    data class Session(
+        val profileId: Long,
+        val items: List<PlayableItem>,
+        val startIndex: Int,
+        /** "Recommencer": ignore the saved position of the first item. */
+        val fromStart: Boolean = false,
+    )
 
     @Volatile
     var current: Session? = null

@@ -30,6 +30,8 @@ import com.nova.iptv.ui.browse.CatalogScreen
 import com.nova.iptv.ui.browse.LiveScreen
 import com.nova.iptv.ui.components.NovaLogo
 import com.nova.iptv.ui.guide.GuideScreen
+import com.nova.iptv.ui.movie.MovieScreen
+import com.nova.iptv.ui.search.SearchScreen
 import com.nova.iptv.ui.home.HomeScreen
 import com.nova.iptv.ui.profiles.ProfileEditScreen
 import com.nova.iptv.ui.profiles.ProfilesScreen
@@ -102,13 +104,27 @@ fun NovaAppUi() {
 private fun NovaNavHost(nav: NavHostController, goToTab: (String) -> Unit, modifier: Modifier) {
     val addProfile = { nav.navigate("profile/edit") }
     val openSeries = { ref: String -> nav.navigate("seriesDetail/" + Uri.encode(ref)) }
+    val openMovie = { ref: String -> nav.navigate("movie/" + Uri.encode(ref)) }
 
     NavHost(nav, startDestination = "home", modifier = modifier) {
-        composable("home") { HomeScreen(onNavigate = goToTab, onAddProfile = addProfile, onOpenSeries = openSeries) }
+        composable("home") {
+            HomeScreen(
+                onNavigate = { route -> if (route == "search") nav.navigate("search") else goToTab(route) },
+                onAddProfile = addProfile,
+                onOpenSeries = openSeries,
+                onOpenMovie = openMovie,
+            )
+        }
+        composable("search") {
+            SearchScreen(onBack = { nav.popBackStack() }, onOpenMovie = openMovie, onOpenSeries = openSeries)
+        }
+        composable("movie/{ref}", arguments = listOf(navArgument("ref") { type = NavType.StringType })) { entry ->
+            MovieScreen(ref = entry.arguments?.getString("ref").orEmpty(), onBack = { nav.popBackStack() }, onOpenMovie = openMovie)
+        }
         composable("live") { LiveScreen(onAddProfile = addProfile, onOpenGuide = { nav.navigate("guide") }) }
         composable("guide") { GuideScreen(onBack = { nav.popBackStack() }) }
-        composable("movies") { CatalogScreen(ContentKind.MOVIE, onOpenSeries = openSeries, onAddProfile = addProfile) }
-        composable("series") { CatalogScreen(ContentKind.SERIES, onOpenSeries = openSeries, onAddProfile = addProfile) }
+        composable("movies") { CatalogScreen(ContentKind.MOVIE, onOpenSeries = openSeries, onOpenMovie = openMovie, onAddProfile = addProfile) }
+        composable("series") { CatalogScreen(ContentKind.SERIES, onOpenSeries = openSeries, onOpenMovie = openMovie, onAddProfile = addProfile) }
         composable("profiles") {
             ProfilesScreen(onAdd = addProfile, onEdit = { id -> nav.navigate("profile/edit?id=$id") })
         }

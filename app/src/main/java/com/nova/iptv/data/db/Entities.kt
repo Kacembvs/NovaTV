@@ -79,6 +79,8 @@ data class ContentEntity(
     val year: String? = null,
     val rating: String? = null,
     val description: String? = null,
+    /** Date added on the provider (Xtream "added"), used for "Nouveautés". Null for M3U. */
+    val addedAt: Long? = null,
 )
 
 fun ContentEntity.toPlayable() = PlayableItem(
@@ -131,12 +133,35 @@ data class HistoryEntity(
     val positionMs: Long,
     val durationMs: Long,
     val updatedAt: Long = System.currentTimeMillis(),
+    /** Series reference for episodes (e.g. "xseries:12"), used for "Séries en cours". */
+    val parentKey: String? = null,
 ) {
     val progress: Float
         get() = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
 }
 
-fun HistoryEntity.toPlayable() = PlayableItem(itemKey, title, kind, logo, subtitle)
+fun HistoryEntity.toPlayable() = PlayableItem(itemKey, title, kind, logo, subtitle, parentKey)
+
+/** Like (+1) / dislike (-1) given by the user, per profile. */
+@Entity(
+    tableName = "ratings",
+    primaryKeys = ["profileId", "itemKey"],
+    foreignKeys = [ForeignKey(
+        entity = ProfileEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["profileId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+data class RatingEntity(
+    val profileId: Long,
+    val itemKey: String,
+    val kind: ContentKind,
+    val title: String,
+    val logo: String?,
+    val value: Int,
+    val updatedAt: Long = System.currentTimeMillis(),
+)
 
 data class GroupCount(val name: String, val count: Int)
 

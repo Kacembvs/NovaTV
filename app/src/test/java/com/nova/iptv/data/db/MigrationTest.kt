@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -15,18 +16,16 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
 
-/** Builds a real version-1 database from the exported schema, then opens it with the current code. */
+/** Builds real old-version databases from the exported schemas, then opens them with the current code. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class MigrationTest {
 
-    @Test
-    fun migrationFrom1To2KeepsProfilesAndPassesRoomValidation() = runBlocking {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val name = "migration-test.db"
-        context.deleteDatabase(name)
+    private val context = ApplicationProvider.getApplicationContext<Context>()
 
-        val schema = JSONObject(File("schemas/com.nova.iptv.data.db.NovaDatabase/1.json").readText())
+    private fun createDatabase(name: String, version: Int, seed: (SQLiteDatabase) -> Unit) {
+        context.deleteDatabase(name)
+        val schema = JSONObject(File("schemas/com.nova.iptv.data.db.NovaDatabase/$version.json").readText())
             .getJSONObject("database")
         val file = context.getDatabasePath(name).apply { parentFile?.mkdirs() }
         SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
@@ -50,18 +49,47 @@ class MigrationTest {
                 put("contentCount", 42)
                 put("createdAt", 1L)
             })
-            db.version = 1
+            seed(db)
+            db.version = version
         }
+    }
 
-        val room = Room.databaseBuilder(context, NovaDatabase::class.java, name)
-            .addMigrations(NovaDatabase.MIGRATION_1_2)
-            .allowMainThreadQueries()
-            .build()
+    private fun open(name: String) = Room.databaseBuilder(context, NovaDatabase::class.java, name)
+        .addMigrations(*NovaDatabase.ALL_MIGRATIONS)
+        .allowMainThreadQueries()
+        .build()
+
+    @Test
+    fun migrationFrom1KeepsProfilesAndPassesRoomValidation() = runBlocking {
+        createDatabase("migration-v1.db", 1) {}
+        val room = open("migration-v1.db")
         val profile = room.profileDao().get(1)!!
         assertEquals("Mon IPTV", profile.name)
         assertEquals(42, profile.contentCount)
         assertNull(profile.customEpgUrl)
         room.epgDao().insertAll(listOf(EpgProgrammeEntity(1, "tf1.fr", 0, 1000, "JT", null)))
+        room.close()
+    }
+
+    @Test
+    fun migrationFrom2KeepsHistoryAndAddsRatings() = runBlocking {
+        createDatabase("migration-v2.db", 2) { db ->
+            db.insert("history", null, ContentValues().apply {
+                put("profileId", 1)
+                put("itemKey", "movie/1.mp4")
+                put("kind", "MOVIE")
+                put("title", "Film")
+                put("positionMs", 60_000)
+                put("durationMs", 120_000)
+                put("updatedAt", 5L)
+            })
+        }
+        val room = open("migration-v2.db")
+        val history = room.libraryDao().history(1, "movie/1.mp4")!!
+        assertEquals(60_000, history.positionMs)
+        assertNull(history.parentKey)
+        room.libraryDao().setRating(RatingEntity(1, "movie/1.mp4", com.nova.iptv.domain.ContentKind.MOVIE, "Film", null, 1))
+        assertEquals(1, room.libraryDao().rating(1, "movie/1.mp4").first())
         room.close()
     }
 }

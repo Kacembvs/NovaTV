@@ -22,9 +22,16 @@ inline fun <reified VM : ViewModel> novaViewModel(key: String? = null, crossinli
 }
 
 object Playback {
-    fun start(context: Context, container: AppContainer, profileId: Long, items: List<PlayableItem>, startIndex: Int) {
+    fun start(
+        context: Context,
+        container: AppContainer,
+        profileId: Long,
+        items: List<PlayableItem>,
+        startIndex: Int,
+        fromStart: Boolean = false,
+    ) {
         if (items.isEmpty()) return
-        container.playbackQueue.current = PlaybackQueue.Session(profileId, items, startIndex.coerceIn(items.indices))
+        container.playbackQueue.current = PlaybackQueue.Session(profileId, items, startIndex.coerceIn(items.indices), fromStart)
         context.startActivity(Intent(context, PlayerActivity::class.java))
     }
 }

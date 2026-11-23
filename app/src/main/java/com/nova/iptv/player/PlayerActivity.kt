@@ -176,7 +176,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         val start = session.startIndex
         var startPosition = 0L
         val startItem = session.items[start]
-        if (startItem.kind != ContentKind.LIVE) {
+        if (startItem.kind != ContentKind.LIVE && !session.fromStart) {
             val history = withContext(Dispatchers.IO) { container.db.libraryDao().history(session.profileId, startItem.ref) }
             if (history != null && history.positionMs > 10_000 &&
                 (history.durationMs <= 0 || history.positionMs < history.durationMs * 0.95)
@@ -766,6 +766,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             logo = item.logo,
             positionMs = position,
             durationMs = duration,
+            parentKey = item.parentKey,
         )
         container.appScope.launch { container.db.libraryDao().saveHistory(entry) }
     }

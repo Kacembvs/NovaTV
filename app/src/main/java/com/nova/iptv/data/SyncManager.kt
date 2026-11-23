@@ -149,6 +149,7 @@ class SyncManager(
                     sortIndex = index++,
                     year = item["year"]?.ifBlank { null },
                     rating = item["rating"]?.ifBlank { null },
+                    addedAt = item["added"]?.toLongOrNull()?.times(1000),
                 )
             )
         }
@@ -168,6 +169,7 @@ class SyncManager(
                     year = (item["releaseDate"] ?: item["release_date"])?.take(4)?.ifBlank { null },
                     rating = item["rating"]?.ifBlank { null },
                     description = item["plot"]?.ifBlank { null },
+                    addedAt = item["last_modified"]?.toLongOrNull()?.times(1000),
                 )
             )
         }

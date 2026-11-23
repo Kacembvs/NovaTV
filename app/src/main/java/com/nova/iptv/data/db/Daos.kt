@@ -119,6 +119,33 @@ interface ContentDao {
             "AND (:group IS NULL OR groupTitle = :group) ORDER BY sortIndex LIMIT 3000"
     )
     fun guideChannels(profileId: Long, group: String?): Flow<List<ContentEntity>>
+
+    @Query(
+        "SELECT * FROM contents WHERE profileId = :profileId AND kind = :kind AND addedAt IS NOT NULL " +
+            "ORDER BY addedAt DESC LIMIT :limit"
+    )
+    fun latest(profileId: Long, kind: ContentKind, limit: Int): Flow<List<ContentEntity>>
+
+    @Query("SELECT * FROM contents WHERE profileId = :profileId AND streamRef IN (:refs)")
+    suspend fun byRefs(profileId: Long, refs: List<String>): List<ContentEntity>
+
+    @Query(
+        "SELECT * FROM contents WHERE profileId = :profileId AND kind IN ('MOVIE', 'SERIES') " +
+            "AND groupTitle IN (:groups) ORDER BY addedAt DESC, sortIndex LIMIT 600"
+    )
+    suspend fun recommendationCandidates(profileId: Long, groups: List<String>): List<ContentEntity>
+
+    @Query(
+        "SELECT * FROM contents WHERE profileId = :profileId AND kind = :kind AND groupTitle = :group " +
+            "AND streamRef != :excludeRef ORDER BY addedAt DESC, sortIndex LIMIT 20"
+    )
+    suspend fun similar(profileId: Long, kind: ContentKind, group: String, excludeRef: String): List<ContentEntity>
+
+    @Query(
+        "SELECT * FROM contents WHERE profileId = :profileId AND kind = :kind " +
+            "AND name LIKE '%' || :query || '%' ORDER BY sortIndex LIMIT :limit"
+    )
+    suspend fun search(profileId: Long, kind: ContentKind, query: String, limit: Int): List<ContentEntity>
 }
 
 @Dao
@@ -152,4 +179,25 @@ interface LibraryDao {
 
     @Query("SELECT * FROM history WHERE profileId = :profileId AND kind = 'EPISODE'")
     fun episodeHistory(profileId: Long): Flow<List<HistoryEntity>>
+
+    @Query("SELECT * FROM history WHERE profileId = :profileId AND itemKey = :key")
+    fun observeHistory(profileId: Long, key: String): Flow<HistoryEntity?>
+
+    @Query("SELECT * FROM history WHERE profileId = :profileId AND kind != 'LIVE' ORDER BY updatedAt DESC LIMIT 200")
+    fun watched(profileId: Long): Flow<List<HistoryEntity>>
+
+    @Query("SELECT * FROM history WHERE profileId = :profileId AND parentKey IS NOT NULL ORDER BY updatedAt DESC LIMIT 200")
+    fun seriesHistory(profileId: Long): Flow<List<HistoryEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun setRating(rating: RatingEntity)
+
+    @Query("DELETE FROM ratings WHERE profileId = :profileId AND itemKey = :key")
+    suspend fun clearRating(profileId: Long, key: String)
+
+    @Query("SELECT value FROM ratings WHERE profileId = :profileId AND itemKey = :key")
+    fun rating(profileId: Long, key: String): Flow<Int?>
+
+    @Query("SELECT * FROM ratings WHERE profileId = :profileId")
+    fun ratings(profileId: Long): Flow<List<RatingEntity>>
 }

@@ -15,6 +15,8 @@ data class PlayableItem(
     val kind: ContentKind,
     val logo: String? = null,
     val subtitle: String? = null,
+    /** Series reference for episodes, so history can show "Séries en cours". */
+    val parentKey: String? = null,
 )
 
 const val XTREAM_SERIES_PREFIX = "xseries:"

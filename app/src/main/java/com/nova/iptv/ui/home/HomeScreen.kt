@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -32,6 +33,7 @@ import com.nova.iptv.core.isTelevision
 import com.nova.iptv.data.SyncManager
 import com.nova.iptv.data.db.*
 import com.nova.iptv.domain.ContentKind
+import com.nova.iptv.domain.PlayableItem
 import com.nova.iptv.domain.isXtreamSeries
 import com.nova.iptv.ui.Playback
 import com.nova.iptv.ui.components.*
@@ -48,6 +50,19 @@ data class HomeState(
     val continueWatching: List<HistoryEntity> = emptyList(),
     val recentChannels: List<HistoryEntity> = emptyList(),
     val favorites: List<FavoriteEntity> = emptyList(),
+    val seriesInProgress: List<HistoryEntity> = emptyList(),
+    val recommendations: List<ContentEntity> = emptyList(),
+    val liked: List<RatingEntity> = emptyList(),
+    val newMovies: List<ContentEntity> = emptyList(),
+    val newSeries: List<ContentEntity> = emptyList(),
+)
+
+private data class Discovery(
+    val seriesInProgress: List<HistoryEntity>,
+    val recommendations: List<ContentEntity>,
+    val liked: List<RatingEntity>,
+    val newMovies: List<ContentEntity>,
+    val newSeries: List<ContentEntity>,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -58,7 +73,7 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
                 flowOf(HomeState(loading = false))
             } else {
                 val library = c.db.libraryDao()
-                combine(
+                val base = combine(
                     library.continueWatching(profile.id),
                     library.recentLive(profile.id),
                     library.favorites(profile.id),
@@ -75,6 +90,24 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
                         favorites = favorites,
                     )
                 }
+                val discovery = combine(
+                    c.library.seriesInProgress(profile.id),
+                    c.library.recommendations(profile.id),
+                    c.library.liked(profile.id),
+                    c.db.contentDao().latest(profile.id, ContentKind.MOVIE, 20),
+                    c.db.contentDao().latest(profile.id, ContentKind.SERIES, 20),
+                ) { series, recommended, liked, newMovies, newSeries ->
+                    Discovery(series, recommended, liked, newMovies, newSeries)
+                }
+                combine(base, discovery) { b, d ->
+                    b.copy(
+                        seriesInProgress = d.seriesInProgress,
+                        recommendations = d.recommendations,
+                        liked = d.liked,
+                        newMovies = d.newMovies,
+                        newSeries = d.newSeries,
+                    )
+                }
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeState())
@@ -83,8 +116,8 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
         Playback.start(context, c, list[index].profileId, list.map { it.toPlayable() }, index)
     }
 
-    fun playFavorite(context: Context, favorite: FavoriteEntity) {
-        Playback.start(context, c, favorite.profileId, listOf(favorite.toPlayable()), 0)
+    fun playSingle(context: Context, profileId: Long, item: PlayableItem) {
+        Playback.start(context, c, profileId, listOf(item), 0)
     }
 }
 
@@ -93,6 +126,7 @@ fun HomeScreen(
     onNavigate: (String) -> Unit,
     onAddProfile: () -> Unit,
     onOpenSeries: (String) -> Unit,
+    onOpenMovie: (String) -> Unit,
 ) {
     val vm = novaViewModel { HomeViewModel(it) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -105,6 +139,15 @@ fun HomeScreen(
         Welcome(onAddProfile)
         return
     }
+    // Films open their detail page, Xtream series their season list, everything else plays directly.
+    val open: (PlayableItem) -> Unit = { item ->
+        when {
+            item.kind == ContentKind.MOVIE -> onOpenMovie(item.ref)
+            item.ref.isXtreamSeries() -> onOpenSeries(item.ref)
+            else -> vm.playSingle(context, profile.id, item)
+        }
+    }
+    val posterWidth = if (tv) 150.dp else 110.dp
 
     LazyColumn(
         contentPadding = PaddingValues(vertical = 16.dp),
@@ -118,6 +161,7 @@ fun HomeScreen(
             ) {
                 NovaLogo(Modifier.height(if (tv) 64.dp else 48.dp))
                 Spacer(Modifier.weight(1f))
+                IconButton(onClick = { onNavigate("search") }) { Icon(Icons.Rounded.Search, contentDescription = "Recherche") }
                 AssistChip(
                     onClick = { onNavigate("profiles") },
                     label = { Text(profile.name, maxLines = 1) },
@@ -152,6 +196,21 @@ fun HomeScreen(
                 }
             }
         }
+        if (state.seriesInProgress.isNotEmpty()) {
+            item {
+                HomeRow("Séries en cours") {
+                    itemsIndexed(state.seriesInProgress, key = { _, h -> "s:" + h.parentKey }) { _, entry ->
+                        PosterCard(
+                            title = entry.title,
+                            imageUrl = entry.logo,
+                            subtitle = entry.subtitle,
+                            modifier = Modifier.width(posterWidth),
+                            onClick = { entry.parentKey?.let(onOpenSeries) },
+                        )
+                    }
+                }
+            }
+        }
         if (state.recentChannels.isNotEmpty()) {
             item {
                 HomeRow("Dernières chaînes regardées") {
@@ -167,22 +226,48 @@ fun HomeScreen(
             item {
                 HomeRow("Mes favoris") {
                     itemsIndexed(state.favorites, key = { _, f -> f.itemKey }) { _, favorite ->
-                        val open = {
-                            if (favorite.itemKey.isXtreamSeries()) onOpenSeries(favorite.itemKey) else vm.playFavorite(context, favorite)
-                        }
                         if (favorite.kind == ContentKind.LIVE) {
-                            ChannelTile(favorite.title, favorite.logo, Modifier.width(if (tv) 180.dp else 132.dp), open)
+                            ChannelTile(favorite.title, favorite.logo, Modifier.width(if (tv) 180.dp else 132.dp)) { open(favorite.toPlayable()) }
                         } else {
-                            PosterCard(favorite.title, favorite.logo, open, Modifier.width(if (tv) 150.dp else 110.dp))
+                            PosterCard(favorite.title, favorite.logo, { open(favorite.toPlayable()) }, Modifier.width(posterWidth))
                         }
                     }
                 }
             }
         }
-        if (state.continueWatching.isEmpty() && state.recentChannels.isEmpty() && state.favorites.isEmpty()) {
+        if (state.liked.isNotEmpty()) {
+            item {
+                HomeRow("Mes coups de cœur") {
+                    itemsIndexed(state.liked, key = { _, r -> "l:" + r.itemKey }) { _, liked ->
+                        PosterCard(liked.title, liked.logo, { open(PlayableItem(liked.itemKey, liked.title, liked.kind, liked.logo)) }, Modifier.width(posterWidth))
+                    }
+                }
+            }
+        }
+        if (state.recommendations.isNotEmpty()) {
+            item {
+                HomeRow("Recommandé pour vous") {
+                    itemsIndexed(state.recommendations, key = { _, c -> "r:" + c.id }) { _, content ->
+                        PosterCard(content.name, content.logo, { open(content.toPlayable().copy(kind = content.kind)) }, Modifier.width(posterWidth), subtitle = content.groupTitle)
+                    }
+                }
+            }
+        }
+        listOf("Nouveaux films" to state.newMovies, "Nouvelles séries" to state.newSeries).forEach { (title, list) ->
+            if (list.isNotEmpty()) {
+                item {
+                    HomeRow(title) {
+                        itemsIndexed(list, key = { _, c -> "n:" + c.id }) { _, content ->
+                            PosterCard(content.name, content.logo, { open(content.toPlayable().copy(kind = content.kind)) }, Modifier.width(posterWidth), subtitle = content.year)
+                        }
+                    }
+                }
+            }
+        }
+        if (state.continueWatching.isEmpty() && state.recentChannels.isEmpty() && state.favorites.isEmpty() && state.recommendations.isEmpty()) {
             item {
                 Text(
-                    "Lancez une chaîne ou un film : vos reprises, dernières chaînes et favoris apparaîtront ici.",
+                    "Lancez une chaîne ou un film : vos reprises, favoris et recommandations apparaîtront ici.",
                     color = NovaColors.TextSecondary,
                     fontSize = 14.sp,
                     modifier = Modifier.padding(horizontal = 20.dp),
@@ -191,7 +276,6 @@ fun HomeScreen(
         }
     }
 }
-
 @Composable
 private fun Welcome(onAddProfile: () -> Unit) {
     Column(

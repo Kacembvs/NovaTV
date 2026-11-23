@@ -25,8 +25,9 @@ class Converters {
         FavoriteEntity::class,
         HistoryEntity::class,
         EpgProgrammeEntity::class,
+        RatingEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -55,9 +56,25 @@ abstract class NovaDatabase : RoomDatabase() {
         const val EPG_INDEX_SQL =
             "CREATE INDEX IF NOT EXISTS `index_epg_programmes_profileId_endMs` ON `epg_programmes` (`profileId`, `endMs`)"
 
+        /** v3: likes/dislikes, provider "added" date (Nouveautés), series link in history (Séries en cours). */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `contents` ADD COLUMN `addedAt` INTEGER")
+                db.execSQL("ALTER TABLE `history` ADD COLUMN `parentKey` TEXT")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `ratings` (`profileId` INTEGER NOT NULL, `itemKey` TEXT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, `title` TEXT NOT NULL, `logo` TEXT, `value` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`profileId`, `itemKey`), FOREIGN KEY(`profileId`) " +
+                        "REFERENCES `profiles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+                )
+            }
+        }
+
+        val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+
         fun create(context: Context): NovaDatabase =
             Room.databaseBuilder(context, NovaDatabase::class.java, "nova.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(*ALL_MIGRATIONS)
                 .build()
     }
 }

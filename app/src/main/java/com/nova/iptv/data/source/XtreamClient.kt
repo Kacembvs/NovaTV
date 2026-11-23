@@ -30,6 +30,66 @@ class XtreamClient(private val http: OkHttpClient) {
         val episodes: List<Episode>,
     )
 
+    data class VodInfo(
+        val plot: String?,
+        val genre: String?,
+        val duration: String?,
+        val releaseDate: String?,
+        val rating: String?,
+        val director: String?,
+        val cast: String?,
+        val cover: String?,
+        val backdrop: String?,
+    )
+
+    fun vodInfo(credentials: Credentials, vodId: String): VodInfo =
+        read(apiUrl(credentials, "get_vod_info", mapOf("vod_id" to vodId))) { r ->
+            var info: Map<String, String> = emptyMap()
+            var backdrop: String? = null
+            if (r.peek() != JsonToken.BEGIN_OBJECT) {
+                r.skipValue()
+            } else {
+                r.beginObject()
+                while (r.hasNext()) {
+                    if (r.nextName() == "info" && r.peek() == JsonToken.BEGIN_OBJECT) {
+                        val values = HashMap<String, String>()
+                        r.beginObject()
+                        while (r.hasNext()) {
+                            val name = r.nextName()
+                            when {
+                                name == "backdrop_path" && r.peek() == JsonToken.BEGIN_ARRAY -> {
+                                    r.beginArray()
+                                    while (r.hasNext()) {
+                                        if (backdrop == null && r.peek() == JsonToken.STRING) backdrop = r.nextString() else r.skipValue()
+                                    }
+                                    r.endArray()
+                                }
+                                r.peek() == JsonToken.STRING || r.peek() == JsonToken.NUMBER -> values[name] = r.nextString()
+                                else -> r.skipValue()
+                            }
+                        }
+                        r.endObject()
+                        info = values
+                    } else {
+                        r.skipValue()
+                    }
+                }
+                r.endObject()
+            }
+            fun field(vararg keys: String) = keys.firstNotNullOfOrNull { info[it]?.trim()?.ifEmpty { null } }
+            VodInfo(
+                plot = field("plot", "description"),
+                genre = field("genre"),
+                duration = field("duration"),
+                releaseDate = field("releasedate", "release_date"),
+                rating = field("rating"),
+                director = field("director"),
+                cast = field("cast", "actors"),
+                cover = field("cover_big", "movie_image"),
+                backdrop = backdrop?.ifBlank { null },
+            )
+        }
+
     fun authenticate(credentials: Credentials) {
         read(apiUrl(credentials, null)) { r ->
             if (r.peek() != JsonToken.BEGIN_OBJECT) throw IOException("Réponse inattendue du serveur Xtream.")

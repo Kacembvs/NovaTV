@@ -15,7 +15,7 @@ import com.nova.iptv.ui.components.PosterCard
 import com.nova.iptv.ui.novaViewModel
 
 @Composable
-fun CatalogScreen(kind: ContentKind, onOpenSeries: (String) -> Unit, onAddProfile: () -> Unit) {
+fun CatalogScreen(kind: ContentKind, onOpenSeries: (String) -> Unit, onOpenMovie: (String) -> Unit, onAddProfile: () -> Unit) {
     val vm = novaViewModel(key = "catalog-$kind") { BrowseViewModel(it, kind) }
     val context = LocalContext.current
     val tv = context.isTelevision()
@@ -39,7 +39,11 @@ fun CatalogScreen(kind: ContentKind, onOpenSeries: (String) -> Unit, onAddProfil
                     isFavorite = item.streamRef in favorites,
                     onToggleFavorite = { vm.toggleFavorite(item) },
                     onClick = {
-                        if (item.streamRef.isXtreamSeries()) onOpenSeries(item.streamRef) else vm.play(context, item)
+                        when {
+                            item.kind == ContentKind.MOVIE -> onOpenMovie(item.streamRef)
+                            item.streamRef.isXtreamSeries() -> onOpenSeries(item.streamRef)
+                            else -> vm.play(context, item)
+                        }
                     },
                 )
             }

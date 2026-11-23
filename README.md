@@ -80,7 +80,7 @@ app/src/main/java/com/nova/iptv/
 
 ## État du projet
 
-Compilation debug vérifiée, 15 tests unitaires OK (parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, libellés pistes/vitesses, migration de base 1→2 sous Robolectric). Parseur validé
+Compilation debug vérifiée, 18 tests unitaires OK (parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, libellés pistes/vitesses, recommandations, migrations de base 1→3 sous Robolectric). Parseur validé
 sur une playlist publique réelle (231 chaînes, 33 catégories).
 
 | Fonction | État |
@@ -109,5 +109,10 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Gestes mobiles : luminosité (gauche), volume (droite), double appui ±10 s, désactivables | Fait |
 | Verrouillage de l'écran, rotation configurable, informations techniques du flux | Fait |
 | Télécommande : touche Menu = options ; haut depuis la barre de progression = barre d'actions | Fait |
-| Thèmes, recommandations, fiche film, recherche globale | À faire |
+| Fiche film : synopsis, durée, genre, réalisation, casting (Xtream get_vod_info), Regarder/Reprendre/Recommencer | Fait |
+| J'aime / Je n'aime pas (films et séries), titres similaires | Fait |
+| Recommandations locales (j'aime, favoris, visionnages, je n'aime pas), sans serveur | Fait |
+| Accueil : séries en cours, coups de cœur, recommandés, nouveaux films/séries (Xtream) | Fait |
+| Recherche globale chaînes / films / séries | Fait |
+| Thèmes, vraie interface TV (bannière, 3 zones), Picture-in-Picture, sauvegarde | À faire |
 | Tests instrumentés / sur Android TV réelle | À faire |

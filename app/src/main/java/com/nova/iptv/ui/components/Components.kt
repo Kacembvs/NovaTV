@@ -17,6 +17,10 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.ThumbDown
+import androidx.compose.material.icons.rounded.ThumbDownOffAlt
+import androidx.compose.material.icons.rounded.ThumbUp
+import androidx.compose.material.icons.rounded.ThumbUpOffAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -120,6 +124,24 @@ fun PosterCard(
                 FavoriteButton(isFavorite, onToggleFavorite, size = 32.dp)
             }
         }
+    }
+}
+
+@Composable
+fun RatingButtons(rating: Int?, onRate: (Int) -> Unit) {
+    IconButton(onClick = { onRate(1) }) {
+        Icon(
+            if (rating == 1) Icons.Rounded.ThumbUp else Icons.Rounded.ThumbUpOffAlt,
+            contentDescription = if (rating == 1) "Retirer J'aime" else "J'aime",
+            tint = if (rating == 1) NovaColors.Cyan else NovaColors.TextSecondary,
+        )
+    }
+    IconButton(onClick = { onRate(-1) }) {
+        Icon(
+            if (rating == -1) Icons.Rounded.ThumbDown else Icons.Rounded.ThumbDownOffAlt,
+            contentDescription = if (rating == -1) "Retirer Je n'aime pas" else "Je n'aime pas",
+            tint = if (rating == -1) NovaColors.Violet else NovaColors.TextSecondary,
+        )
     }
 }
 
