@@ -93,6 +93,19 @@ interface ContentDao {
     suspend fun allGroups(profileId: Long): List<GroupCount>
 
     @Query(
+        "SELECT c.* FROM contents c INNER JOIN custom_group_items i ON i.itemKey = c.streamRef " +
+            "WHERE i.groupId = :groupId AND c.profileId = :profileId AND c.kind = 'LIVE' " +
+            "AND c.name LIKE '%' || :query || '%' AND c.groupTitle NOT IN (:hidden) ORDER BY i.addedAt"
+    )
+    fun pageCustom(profileId: Long, groupId: Long, query: String, hidden: List<String>): PagingSource<Int, ContentEntity>
+
+    @Query(
+        "SELECT c.* FROM contents c INNER JOIN custom_group_items i ON i.itemKey = c.streamRef " +
+            "WHERE i.groupId = :groupId AND c.profileId = :profileId AND c.kind = 'LIVE' ORDER BY i.addedAt"
+    )
+    suspend fun listCustom(profileId: Long, groupId: Long): List<ContentEntity>
+
+    @Query(
         "SELECT groupTitle AS name, COUNT(*) AS count FROM contents " +
             "WHERE profileId = :profileId AND kind = :kind GROUP BY groupTitle ORDER BY MIN(sortIndex)"
     )
@@ -221,4 +234,44 @@ interface LibraryDao {
 
     @Query("SELECT * FROM ratings")
     suspend fun allRatings(): List<RatingEntity>
+}
+
+@Dao
+interface CustomGroupDao {
+    @Query(
+        "SELECT g.id AS id, g.name AS name, COUNT(i.itemKey) AS count FROM custom_groups g " +
+            "LEFT JOIN custom_group_items i ON i.groupId = g.id WHERE g.profileId = :profileId " +
+            "GROUP BY g.id ORDER BY g.createdAt"
+    )
+    fun observe(profileId: Long): Flow<List<CustomGroupCount>>
+
+    @Insert
+    suspend fun insert(group: CustomGroupEntity): Long
+
+    @Query("UPDATE custom_groups SET name = :name WHERE id = :id")
+    suspend fun rename(id: Long, name: String)
+
+    @Query("DELETE FROM custom_groups WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun addItem(item: CustomGroupItemEntity)
+
+    @Query("DELETE FROM custom_group_items WHERE groupId = :groupId AND itemKey = :key")
+    suspend fun removeItem(groupId: Long, key: String)
+
+    @Query(
+        "SELECT i.groupId FROM custom_group_items i INNER JOIN custom_groups g ON g.id = i.groupId " +
+            "WHERE g.profileId = :profileId AND i.itemKey = :key"
+    )
+    fun groupIdsFor(profileId: Long, key: String): Flow<List<Long>>
+
+    @Query("SELECT * FROM custom_groups WHERE profileId = :profileId AND name = :name LIMIT 1")
+    suspend fun findByName(profileId: Long, name: String): CustomGroupEntity?
+
+    @Query("SELECT * FROM custom_groups")
+    suspend fun all(): List<CustomGroupEntity>
+
+    @Query("SELECT * FROM custom_group_items")
+    suspend fun allItems(): List<CustomGroupItemEntity>
 }

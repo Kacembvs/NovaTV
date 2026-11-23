@@ -92,4 +92,14 @@ class MigrationTest {
         assertEquals(1, room.libraryDao().rating(1, "movie/1.mp4").first())
         room.close()
     }
+
+    @Test
+    fun migrationFrom3AddsCustomGroups() = runBlocking {
+        createDatabase("migration-v3.db", 3) {}
+        val room = open("migration-v3.db")
+        val groupId = room.customGroupDao().insert(CustomGroupEntity(profileId = 1, name = "Sport"))
+        room.customGroupDao().addItem(CustomGroupItemEntity(groupId, "live/1.ts"))
+        assertEquals(1, room.customGroupDao().observe(1).first().single().count)
+        room.close()
+    }
 }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
@@ -202,6 +203,8 @@ fun GroupChips(
     favoritesKey: String,
     onSelect: (String?) -> Unit,
     showFavorites: Boolean = true,
+    /** Extra chips (key, label) shown after "Favoris", e.g. the user's own groups. */
+    extra: List<Pair<String, String>> = emptyList(),
 ) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 20.dp),
@@ -216,6 +219,14 @@ fun GroupChips(
                 onClick = { onSelect(favoritesKey) },
                 label = { Text("Favoris") },
                 leadingIcon = { Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(16.dp)) },
+            )
+        }
+        items(extra, key = { "x:" + it.first }) { (key, label) ->
+            FilterChip(
+                selected = selected == key,
+                onClick = { onSelect(key) },
+                label = { Text(label, maxLines = 1) },
+                leadingIcon = { Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(16.dp)) },
             )
         }
         items(groups, key = { "g:" + it.name }) { group ->

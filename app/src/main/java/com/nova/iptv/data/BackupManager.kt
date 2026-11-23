@@ -3,6 +3,8 @@ package com.nova.iptv.data
 import android.util.Base64
 import androidx.room.withTransaction
 import com.nova.iptv.core.SecretBox
+import com.nova.iptv.data.db.CustomGroupEntity
+import com.nova.iptv.data.db.CustomGroupItemEntity
 import com.nova.iptv.data.db.FavoriteEntity
 import com.nova.iptv.data.db.HistoryEntity
 import com.nova.iptv.data.db.NovaDatabase
@@ -43,6 +45,7 @@ class BackupManager(
         val newProfileIds: List<Long>,
         /** Xtream profiles restored without password (backup made without code). */
         val missingPasswords: Int,
+        val customGroups: Int = 0,
     )
 
     class WrongCodeException : IOException("Code de sauvegarde incorrect.")
@@ -114,6 +117,18 @@ class BackupManager(
                 put(item(r.profileId, r.itemKey, r.kind, r.title, r.logo).put("value", r.value).put("updatedAt", r.updatedAt))
             }
         })
+        val groupItems = db.customGroupDao().allItems().groupBy { it.groupId }
+        root.put("customGroups", JSONArray().apply {
+            db.customGroupDao().all().forEach { g ->
+                put(
+                    JSONObject()
+                        .put("profileId", g.profileId)
+                        .put("name", g.name)
+                        .put("createdAt", g.createdAt)
+                        .put("items", JSONArray().apply { groupItems[g.id].orEmpty().forEach { put(it.itemKey) } }),
+                )
+            }
+        })
         return root.toString(2)
     }
 
@@ -139,6 +154,7 @@ class BackupManager(
         var favorites = 0
         var history = 0
         var ratings = 0
+        var customGroups = 0
 
         db.withTransaction {
             val dao = db.profileDao()
@@ -214,6 +230,16 @@ class BackupManager(
                 )
                 ratings++
             }
+            val groups = db.customGroupDao()
+            root.optJSONArray("customGroups").forEachObject { g ->
+                val profileId = idMap[g.getLong("profileId")] ?: return@forEachObject
+                val name = g.getString("name")
+                val groupId = groups.findByName(profileId, name)?.id
+                    ?: groups.insert(CustomGroupEntity(profileId = profileId, name = name, createdAt = g.optLong("createdAt")))
+                val items = g.optJSONArray("items") ?: JSONArray()
+                for (i in 0 until items.length()) groups.addItem(CustomGroupItemEntity(groupId, items.getString(i)))
+                customGroups++
+            }
         }
 
         root.optJSONObject("settings")?.let { s ->
@@ -229,7 +255,7 @@ class BackupManager(
             val theme = NovaThemeId.entries.firstOrNull { it.name == s.optString("theme") }
             if (theme != null) settings.setTheme(theme, if (s.has("customAccent")) s.getInt("customAccent") else null)
         }
-        return RestoreResult(added, merged, favorites, history, ratings, newIds, missingPasswords)
+        return RestoreResult(added, merged, favorites, history, ratings, newIds, missingPasswords, customGroups)
     }
 
     private fun item(profileId: Long, key: String, kind: ContentKind, title: String, logo: String?) =

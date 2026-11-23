@@ -166,3 +166,40 @@ data class RatingEntity(
 data class GroupCount(val name: String, val count: Int)
 
 data class KindCount(val kind: ContentKind, val count: Int)
+
+/** User-made channel group ("Mes groupes"), per profile. */
+@Entity(
+    tableName = "custom_groups",
+    foreignKeys = [ForeignKey(
+        entity = ProfileEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["profileId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+    indices = [Index("profileId")],
+)
+data class CustomGroupEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val profileId: Long,
+    val name: String,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "custom_group_items",
+    primaryKeys = ["groupId", "itemKey"],
+    foreignKeys = [ForeignKey(
+        entity = CustomGroupEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["groupId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+data class CustomGroupItemEntity(
+    val groupId: Long,
+    /** Channel stream reference ([ContentEntity.streamRef]). */
+    val itemKey: String,
+    val addedAt: Long = System.currentTimeMillis(),
+)
+
+data class CustomGroupCount(val id: Long, val name: String, val count: Int)

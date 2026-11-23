@@ -7,6 +7,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarViewWeek
 import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -61,6 +63,11 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
     val sync by vm.syncState.collectAsStateWithLifecycle()
     val preview by vm.preview.collectAsStateWithLifecycle()
     val previewUrl by vm.previewUrl.collectAsStateWithLifecycle()
+    val customGroups by vm.customGroups.collectAsStateWithLifecycle()
+    var managingGroups by remember { mutableStateOf(false) }
+    var groupsFor by remember { mutableStateOf<ContentEntity?>(null) }
+    groupsFor?.let { CustomGroupsDialog(vm, it) { groupsFor = null } }
+    if (managingGroups) CustomGroupsDialog(vm, null) { managingGroups = false }
     val items = vm.items.collectAsLazyPagingItems()
 
     Row(Modifier.fillMaxSize().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -71,6 +78,16 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
             LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
                 item(key = "all") { CategoryItem("Toutes les chaînes", null, group == null) { vm.group.value = null } }
                 item(key = "fav") { CategoryItem("Favoris", null, group == BrowseViewModel.FAVORITES, star = true) { vm.group.value = BrowseViewModel.FAVORITES } }
+                items(customGroups, key = { "c:" + it.id }) { g ->
+                    val key = BrowseViewModel.customKey(g.id)
+                    CategoryItem(g.name, g.count, group == key, folder = true) { vm.group.value = key }
+                }
+                item(key = "manage") {
+                    TextButton(onClick = { managingGroups = true }) {
+                        Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Text("  Mes groupes", fontSize = 13.sp)
+                    }
+                }
                 items(groups, key = { "g:" + it.name }) { g ->
                     CategoryItem(g.name, g.count, group == g.name) { vm.group.value = g.name }
                 }
@@ -192,6 +209,9 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
                         Text("Plein écran")
                     }
                     FavoriteButton(channel.streamRef in favorites, { vm.toggleFavorite(channel) })
+                    IconButton(onClick = { groupsFor = channel }) {
+                        Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = "Ajouter à un groupe", tint = NovaColors.TextSecondary)
+                    }
                 }
             }
         }
@@ -199,7 +219,7 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
 }
 
 @Composable
-private fun CategoryItem(name: String, count: Int?, selected: Boolean, star: Boolean = false, onClick: () -> Unit) {
+private fun CategoryItem(name: String, count: Int?, selected: Boolean, star: Boolean = false, folder: Boolean = false, onClick: () -> Unit) {
     NovaCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -207,8 +227,8 @@ private fun CategoryItem(name: String, count: Int?, selected: Boolean, star: Boo
         focusScale = 1.02f,
     ) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (star) {
-                Icon(Icons.Rounded.Star, contentDescription = null, tint = NovaColors.Cyan, modifier = Modifier.size(16.dp))
+            if (star || folder) {
+                Icon(if (star) Icons.Rounded.Star else Icons.Rounded.Folder, contentDescription = null, tint = NovaColors.Cyan, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
             }
             Text(

@@ -26,8 +26,10 @@ class Converters {
         HistoryEntity::class,
         EpgProgrammeEntity::class,
         RatingEntity::class,
+        CustomGroupEntity::class,
+        CustomGroupItemEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -36,6 +38,7 @@ abstract class NovaDatabase : RoomDatabase() {
     abstract fun contentDao(): ContentDao
     abstract fun libraryDao(): LibraryDao
     abstract fun epgDao(): EpgDao
+    abstract fun customGroupDao(): CustomGroupDao
 
     companion object {
         /** v2: XMLTV guide (custom EPG URL, EPG sync status, programmes table). */
@@ -70,7 +73,24 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
-        val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+        /** v4: user-made channel groups. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `custom_groups` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`profileId` INTEGER NOT NULL, `name` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, FOREIGN KEY(`profileId`) " +
+                        "REFERENCES `profiles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_custom_groups_profileId` ON `custom_groups` (`profileId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `custom_group_items` (`groupId` INTEGER NOT NULL, `itemKey` TEXT NOT NULL, " +
+                        "`addedAt` INTEGER NOT NULL, PRIMARY KEY(`groupId`, `itemKey`), FOREIGN KEY(`groupId`) " +
+                        "REFERENCES `custom_groups`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+                )
+            }
+        }
+
+        val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 
         fun create(context: Context): NovaDatabase =
             Room.databaseBuilder(context, NovaDatabase::class.java, "nova.db")

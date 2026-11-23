@@ -11,6 +11,7 @@ import com.nova.iptv.data.db.ProfileEntity
 import com.nova.iptv.data.db.RatingEntity
 import com.nova.iptv.domain.ContentKind
 import com.nova.iptv.domain.ProfileType
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -41,6 +42,8 @@ class BackupManagerTest {
         db.libraryDao().addFavorite(FavoriteEntity(id, "live/1.ts", ContentKind.LIVE, "TF1", null))
         db.libraryDao().saveHistory(HistoryEntity(id, "movie/9.mkv", ContentKind.MOVIE, "Film", null, null, 60_000, 120_000, 10L))
         db.libraryDao().setRating(RatingEntity(id, "movie/9.mkv", ContentKind.MOVIE, "Film", null, 1))
+        val groupId = db.customGroupDao().insert(com.nova.iptv.data.db.CustomGroupEntity(profileId = id, name = "Sport"))
+        db.customGroupDao().addItem(com.nova.iptv.data.db.CustomGroupItemEntity(groupId, "live/1.ts"))
         return id
     }
 
@@ -58,9 +61,11 @@ class BackupManagerTest {
         assertEquals(1, result.favorites)
         assertEquals(1, result.history)
         assertEquals(1, result.ratings)
+        assertEquals(1, result.customGroups)
         val restored = target.profileDao().all().single()
         assertEquals("enc:s3cret", restored.encryptedPassword)
         assertEquals(60_000, target.libraryDao().history(restored.id, "movie/9.mkv")!!.positionMs)
+        assertEquals(1, target.customGroupDao().observe(restored.id).first().single().count)
 
         // Restoring twice reuses the existing profile instead of duplicating it.
         val again = BackupManager(target, box, settings).restore(json, "1234")

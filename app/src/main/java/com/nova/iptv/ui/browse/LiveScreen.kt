@@ -5,6 +5,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarViewWeek
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -45,12 +48,15 @@ fun LiveScreen(onAddProfile: () -> Unit, onOpenGuide: () -> Unit) {
         return
     }
     val epg by vm.epg.collectAsStateWithLifecycle()
+    var groupsFor by remember { mutableStateOf<ContentEntity?>(null) }
+    var managingGroups by remember { mutableStateOf(false) }
     BrowseScaffold(
         vm,
         title = "TV en direct",
         searchHint = "Rechercher une chaîne",
         onAddProfile = onAddProfile,
         headerAction = {
+            IconButton(onClick = { managingGroups = true }) { Icon(Icons.Rounded.Folder, contentDescription = "Mes groupes") }
             FilledTonalButton(onClick = onOpenGuide) {
                 Icon(Icons.Rounded.CalendarViewWeek, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
@@ -71,10 +77,13 @@ fun LiveScreen(onAddProfile: () -> Unit, onOpenGuide: () -> Unit) {
                     isFavorite = channel.streamRef in favorites,
                     onClick = { vm.play(context, channel) },
                     onToggleFavorite = { vm.toggleFavorite(channel) },
+                    onGroups = { groupsFor = channel },
                 )
             }
         }
     }
+    groupsFor?.let { CustomGroupsDialog(vm, it) { groupsFor = null } }
+    if (managingGroups) CustomGroupsDialog(vm, null) { managingGroups = false }
 }
 
 @Composable
@@ -84,6 +93,7 @@ private fun ChannelRow(
     isFavorite: Boolean,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onGroups: () -> Unit,
 ) {
     NovaCard(onClick = onClick, modifier = Modifier.fillMaxWidth(), focusScale = 1.02f) {
         Row(
@@ -128,6 +138,9 @@ private fun ChannelRow(
                     Text(channel.groupTitle, color = NovaColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            IconButton(onClick = onGroups, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = "Ajouter à un groupe", tint = NovaColors.TextSecondary)
+            }
             FavoriteButton(isFavorite, onToggleFavorite)
         }
     }
@@ -170,7 +183,14 @@ fun BrowseScaffold(
         }
         SearchField(query, { vm.query.value = it }, searchHint)
         Spacer(Modifier.height(10.dp))
-        GroupChips(groups, group, BrowseViewModel.FAVORITES, onSelect = { vm.group.value = it })
+        val customGroups by vm.customGroups.collectAsStateWithLifecycle()
+        GroupChips(
+            groups,
+            group,
+            BrowseViewModel.FAVORITES,
+            onSelect = { vm.group.value = it },
+            extra = customGroups.map { BrowseViewModel.customKey(it.id) to "${it.name}  ${it.count}" },
+        )
         val hiddenCount by vm.hiddenCount.collectAsStateWithLifecycle()
         HiddenCategoriesButton(hiddenCount, vm::unlock, Modifier.padding(horizontal = 12.dp))
         Spacer(Modifier.height(6.dp))

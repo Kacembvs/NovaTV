@@ -11,6 +11,9 @@ import com.nova.iptv.AppContainer
 import com.nova.iptv.data.NowNext
 import com.nova.iptv.data.SyncManager
 import com.nova.iptv.data.db.ContentEntity
+import com.nova.iptv.data.db.CustomGroupCount
+import com.nova.iptv.data.db.CustomGroupEntity
+import com.nova.iptv.data.db.CustomGroupItemEntity
 import com.nova.iptv.data.db.FavoriteEntity
 import com.nova.iptv.data.db.GroupCount
 import com.nova.iptv.data.db.ProfileEntity
@@ -89,7 +92,12 @@ class BrowseViewModel(private val c: AppContainer, val kind: ContentKind) : View
             } else {
                 val dao = c.db.contentDao()
                 Pager(PagingConfig(pageSize = 60, prefetchDistance = 30, enablePlaceholders = false)) {
-                    if (g == FAVORITES) dao.pageFavorites(id, kind, q, h) else dao.page(id, kind, g, q, h)
+                    val customId = customGroupId(g)
+                    when {
+                        customId != null -> dao.pageCustom(id, customId, q, h)
+                        g == FAVORITES -> dao.pageFavorites(id, kind, q, h)
+                        else -> dao.page(id, kind, g, q, h)
+                    }
                 }.flow
             }
         }
@@ -111,10 +119,13 @@ class BrowseViewModel(private val c: AppContainer, val kind: ContentKind) : View
     /** Live channels and M3U episodes are queued with their group, which enables zapping / next episode. */
     fun play(context: Context, item: ContentEntity) {
         viewModelScope.launch {
-            val siblings = if (item.kind == ContentKind.LIVE || item.kind == ContentKind.SERIES) {
-                c.db.contentDao().listGroup(item.profileId, item.kind, item.groupTitle)
-            } else {
-                emptyList()
+            val customId = customGroupId(group.value)
+            val siblings = when {
+                // Zapping stays inside the user's own group when it is selected.
+                customId != null && item.kind == ContentKind.LIVE -> c.db.contentDao().listCustom(item.profileId, customId)
+                item.kind == ContentKind.LIVE || item.kind == ContentKind.SERIES ->
+                    c.db.contentDao().listGroup(item.profileId, item.kind, item.groupTitle)
+                else -> emptyList()
             }
             val queue = siblings.takeIf { list -> list.any { it.id == item.id } } ?: listOf(item)
             val start = queue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
@@ -122,7 +133,49 @@ class BrowseViewModel(private val c: AppContainer, val kind: ContentKind) : View
         }
     }
 
+    // region Custom channel groups ("Mes groupes")
+
+    val customGroups: StateFlow<List<CustomGroupCount>> = profileId
+        .flatMapLatest { id -> if (id == null || kind != ContentKind.LIVE) flowOf(emptyList()) else c.db.customGroupDao().observe(id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun groupIdsFor(channel: ContentEntity): Flow<List<Long>> = c.db.customGroupDao().groupIdsFor(channel.profileId, channel.streamRef)
+
+    fun setInGroup(groupId: Long, channel: ContentEntity, member: Boolean) {
+        viewModelScope.launch {
+            val dao = c.db.customGroupDao()
+            if (member) dao.addItem(CustomGroupItemEntity(groupId, channel.streamRef)) else dao.removeItem(groupId, channel.streamRef)
+        }
+    }
+
+    fun createGroup(name: String, channel: ContentEntity?) {
+        val clean = name.trim().take(40)
+        val profile = this.profile.value.profile ?: return
+        if (clean.isEmpty()) return
+        viewModelScope.launch {
+            val dao = c.db.customGroupDao()
+            val id = dao.findByName(profile.id, clean)?.id ?: dao.insert(CustomGroupEntity(profileId = profile.id, name = clean))
+            channel?.let { dao.addItem(CustomGroupItemEntity(id, it.streamRef)) }
+        }
+    }
+
+    fun renameGroup(id: Long, name: String) {
+        val clean = name.trim().take(40)
+        if (clean.isNotEmpty()) viewModelScope.launch { c.db.customGroupDao().rename(id, clean) }
+    }
+
+    fun deleteGroup(id: Long) {
+        if (customGroupId(group.value) == id) group.value = null
+        viewModelScope.launch { c.db.customGroupDao().delete(id) }
+    }
+
+    // endregion
+
     companion object {
         const val FAVORITES = "\u0000favorites"
+        private const val CUSTOM_PREFIX = "\u0000custom:"
+
+        fun customKey(id: Long) = CUSTOM_PREFIX + id
+        fun customGroupId(selection: String?): Long? = selection?.takeIf { it.startsWith(CUSTOM_PREFIX) }?.removePrefix(CUSTOM_PREFIX)?.toLongOrNull()
     }
 }
