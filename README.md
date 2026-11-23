@@ -80,7 +80,7 @@ app/src/main/java/com/nova/iptv/
 
 ## État du projet
 
-Compilation debug vérifiée, 25 tests unitaires OK (contrôle parental, worker d'actualisation, sauvegarde/restauration chiffrée, parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, libellés pistes/vitesses, recommandations, migrations de base 1→3 sous Robolectric). Parseur validé
+Compilation debug vérifiée, 28 tests unitaires OK (groupes de chaînes, URLs Cast, contrôle parental, worker d'actualisation, sauvegarde/restauration chiffrée, parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, libellés pistes/vitesses, recommandations, migrations de base 1→3 sous Robolectric). Parseur validé
 sur une playlist publique réelle (231 chaînes, 33 catégories).
 
 | Fonction | État |
@@ -123,5 +123,7 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Contrôle parental : code PIN haché (PBKDF2), catégories masquées partout, réglages protégés | Fait |
 | Langues audio / sous-titres préférées (réglages + mémorisation du choix fait dans le lecteur) | Fait |
 | Actualisation automatique WorkManager toutes les 12 h (playlists + guide), désactivable | Fait |
-| Google Cast, groupes de chaînes personnalisés, tests sur appareils, version release signée (à la demande) | À faire |
+| Groupes de chaînes personnalisés (créer, renommer, supprimer, zapping dans le groupe, sauvegardés) | Fait |
+| Google Cast (Default Media Receiver) : diffusion, pause, zapping, reprise locale à l'arrêt | Fait (dépend de la compatibilité du flux) |
+| Tests sur appareils réels, version release signée (à la demande) | À faire |
 | Tests instrumentés / sur Android TV réelle | À faire |
