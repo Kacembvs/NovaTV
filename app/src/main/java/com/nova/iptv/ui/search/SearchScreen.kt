@@ -52,20 +52,19 @@ class SearchViewModel(private val c: AppContainer) : ViewModel() {
     val query = MutableStateFlow("")
 
     /** Searches the local catalogue only (no network), across every content type. */
-    val results: StateFlow<SearchResults> = combine(
-        c.profiles.activeProfile.map { it?.id }.distinctUntilChanged(),
-        query.debounce(250).map { it.trim() }.distinctUntilChanged(),
-    ) { id, q -> id to q }
-        .mapLatest { (id, q) ->
+    val results: StateFlow<SearchResults> = c.profiles.activeProfile.map { it?.id }.distinctUntilChanged()
+        .flatMapLatest { id -> (if (id == null) flowOf(emptySet()) else c.parental.hiddenGroups(id)).map { id to it } }
+        .combine(query.debounce(250).map { it.trim() }.distinctUntilChanged()) { (id, hidden), q -> Triple(id, hidden.toList(), q) }
+        .mapLatest { (id, hidden, q) ->
             if (id == null || q.length < 2) {
                 SearchResults(q)
             } else {
                 val dao = c.db.contentDao()
                 SearchResults(
                     query = q,
-                    channels = dao.search(id, ContentKind.LIVE, q, 30),
-                    movies = dao.search(id, ContentKind.MOVIE, q, 30),
-                    series = dao.search(id, ContentKind.SERIES, q, 30),
+                    channels = dao.search(id, ContentKind.LIVE, q, 30, hidden),
+                    movies = dao.search(id, ContentKind.MOVIE, q, 30, hidden),
+                    series = dao.search(id, ContentKind.SERIES, q, 30, hidden),
                 )
             }
         }

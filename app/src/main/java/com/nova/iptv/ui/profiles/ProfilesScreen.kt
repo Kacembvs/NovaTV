@@ -27,6 +27,9 @@ import android.content.Context
 import android.net.Uri
 import com.nova.iptv.core.toUserMessage
 import com.nova.iptv.data.BackupManager
+import com.nova.iptv.data.LanguageSettings
+import com.nova.iptv.data.ParentalSettings
+import com.nova.iptv.ui.components.PinDialog
 import com.nova.iptv.data.ThemeSettings
 import com.nova.iptv.ui.theme.NovaThemeId
 import kotlinx.coroutines.CancellationException
@@ -66,6 +69,31 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
     fun setGestures(enabled: Boolean) = viewModelScope.launch { c.settings.setGesturesEnabled(enabled) }
     fun setFreeRotation(enabled: Boolean) = viewModelScope.launch { c.settings.setFreeRotation(enabled) }
     fun setPictureInPicture(enabled: Boolean) = viewModelScope.launch { c.settings.setPictureInPicture(enabled) }
+
+    val languages: StateFlow<LanguageSettings> = c.settings.languages
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LanguageSettings())
+    fun setAudioLanguage(code: String?) = viewModelScope.launch { c.settings.setAudioLanguage(code) }
+    fun setSubtitleLanguage(code: String?) = viewModelScope.launch { c.settings.setSubtitleLanguage(code) }
+
+    val autoRefresh: StateFlow<Boolean> = c.settings.autoRefresh
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+    fun setAutoRefresh(enabled: Boolean) = viewModelScope.launch { c.settings.setAutoRefresh(enabled) }
+
+    val parental: StateFlow<ParentalSettings> = c.parental.state
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ParentalSettings())
+    val parentalUnlocked = c.parental.unlocked
+    val settingsBlocked: StateFlow<Boolean> = c.parental.settingsBlocked()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun lockedGroups(p: ParentalSettings, profileId: Long) = c.parental.lockedGroups(p, profileId)
+    suspend fun allGroups(profileId: Long) = c.db.contentDao().allGroups(profileId)
+    suspend fun verifyPin(pin: String) = c.parental.verify(pin)
+    suspend fun setPin(pin: String) = c.parental.setPin(pin)
+    fun removePin() = viewModelScope.launch { c.parental.removePin() }
+    fun relock() = c.parental.relock()
+    fun setLockSettings(enabled: Boolean) = viewModelScope.launch { c.parental.setLockSettings(enabled) }
+    fun setGroupLocked(profileId: Long, group: String, locked: Boolean) =
+        viewModelScope.launch { c.parental.setGroupLocked(profileId, group, locked) }
 
     val theme: StateFlow<ThemeSettings> = c.settings.theme
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeSettings())
@@ -156,7 +184,25 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
     val epgStates by vm.epgStates.collectAsStateWithLifecycle()
     val playback by vm.playback.collectAsStateWithLifecycle()
     val theme by vm.theme.collectAsStateWithLifecycle()
+    val blocked by vm.settingsBlocked.collectAsStateWithLifecycle()
     var toDelete by remember { mutableStateOf<ProfileEntity?>(null) }
+
+    if (blocked) {
+        var asking by remember { mutableStateOf(false) }
+        EmptyState(
+            title = "Réglages protégés",
+            message = "Le contrôle parental protège les réglages. Saisissez le code PIN pour y accéder.",
+            actionLabel = "Saisir le code",
+            onAction = { asking = true },
+            modifier = Modifier.fillMaxSize().wrapContentHeight(),
+        )
+        if (asking) {
+            PinDialog("Réglages protégés", null, onDismiss = { asking = false }) { pin ->
+                if (vm.verifyPin(pin)) null else "Code incorrect."
+            }
+        }
+        return
+    }
 
     val list = profiles ?: return
     LazyColumn(
@@ -169,6 +215,8 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
         item {
             PlaybackSettingsCard(playback, vm::setAutoplay, vm::setCountdown, vm::setGestures, vm::setFreeRotation, vm::setPictureInPicture)
         }
+        item { LanguagesCard(vm) }
+        item { ParentalCard(vm, activeId) }
         item { BackupCard(vm) }
         item {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(end = 20.dp)) {

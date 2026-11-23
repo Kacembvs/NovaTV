@@ -98,6 +98,7 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("androidx.paging:paging-compose:3.3.5")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // Network, images, playback
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -112,6 +113,7 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("androidx.work:work-testing:2.9.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

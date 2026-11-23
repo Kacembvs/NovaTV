@@ -74,6 +74,10 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
                 items(groups, key = { "g:" + it.name }) { g ->
                     CategoryItem(g.name, g.count, group == g.name) { vm.group.value = g.name }
                 }
+                item(key = "hidden") {
+                    val hiddenCount by vm.hiddenCount.collectAsStateWithLifecycle()
+                    HiddenCategoriesButton(hiddenCount, vm::unlock)
+                }
             }
         }
 

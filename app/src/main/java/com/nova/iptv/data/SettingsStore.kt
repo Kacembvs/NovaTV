@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.nova.iptv.player.PlaybackRules
 import com.nova.iptv.ui.theme.NovaThemeId
@@ -27,6 +28,19 @@ data class PlaybackSettings(
 
 data class ThemeSettings(val theme: NovaThemeId = NovaThemeId.NOVA_BLUE, val customAccent: Int? = null)
 
+/** Preferred track languages (ISO codes). audio = null: automatic; subtitles = null: off. */
+data class LanguageSettings(val audio: String? = null, val subtitles: String? = null)
+
+data class ParentalSettings(
+    val pinHash: String? = null,
+    val pinSalt: String? = null,
+    /** "profileId<US>groupTitle" entries. */
+    val lockedGroups: Set<String> = emptySet(),
+    val lockSettings: Boolean = false,
+) {
+    val pinSet get() = pinHash != null && pinSalt != null
+}
+
 class SettingsStore(private val context: Context) {
     private val activeProfileKey = longPreferencesKey("active_profile_id")
     private val autoplayKey = booleanPreferencesKey("autoplay_next")
@@ -37,7 +51,56 @@ class SettingsStore(private val context: Context) {
     private val themeKey = stringPreferencesKey("theme")
     private val customAccentKey = intPreferencesKey("theme_custom_accent")
 
+    private val audioLangKey = stringPreferencesKey("lang_audio")
+    private val subtitleLangKey = stringPreferencesKey("lang_subtitles")
+    private val pinHashKey = stringPreferencesKey("parental_pin_hash")
+    private val pinSaltKey = stringPreferencesKey("parental_pin_salt")
+    private val lockedGroupsKey = stringSetPreferencesKey("parental_locked_groups")
+    private val lockSettingsKey = booleanPreferencesKey("parental_lock_settings")
+    private val autoRefreshKey = booleanPreferencesKey("auto_refresh")
+
     val activeProfileId: Flow<Long?> = context.dataStore.data.map { it[activeProfileKey] }
+
+    val languages: Flow<LanguageSettings> = context.dataStore.data.map {
+        LanguageSettings(it[audioLangKey]?.ifEmpty { null }, it[subtitleLangKey]?.ifEmpty { null })
+    }
+
+    suspend fun setAudioLanguage(code: String?) {
+        context.dataStore.edit { if (code == null) it.remove(audioLangKey) else it[audioLangKey] = code }
+    }
+
+    suspend fun setSubtitleLanguage(code: String?) {
+        context.dataStore.edit { if (code == null) it.remove(subtitleLangKey) else it[subtitleLangKey] = code }
+    }
+
+    val parental: Flow<ParentalSettings> = context.dataStore.data.map {
+        ParentalSettings(it[pinHashKey], it[pinSaltKey], it[lockedGroupsKey].orEmpty(), it[lockSettingsKey] ?: false)
+    }
+
+    suspend fun setPin(hash: String?, salt: String?) {
+        context.dataStore.edit {
+            if (hash == null || salt == null) {
+                it.remove(pinHashKey); it.remove(pinSaltKey); it.remove(lockedGroupsKey); it.remove(lockSettingsKey)
+            } else {
+                it[pinHashKey] = hash; it[pinSaltKey] = salt
+            }
+        }
+    }
+
+    suspend fun setLockedGroups(groups: Set<String>) {
+        context.dataStore.edit { it[lockedGroupsKey] = groups }
+    }
+
+    suspend fun setLockSettings(enabled: Boolean) {
+        context.dataStore.edit { it[lockSettingsKey] = enabled }
+    }
+
+    /** Background refresh of catalogues and guides (WorkManager), on by default. */
+    val autoRefresh: Flow<Boolean> = context.dataStore.data.map { it[autoRefreshKey] ?: true }
+
+    suspend fun setAutoRefresh(enabled: Boolean) {
+        context.dataStore.edit { it[autoRefreshKey] = enabled }
+    }
 
     val playback: Flow<PlaybackSettings> = context.dataStore.data.map { prefs ->
         PlaybackSettings(

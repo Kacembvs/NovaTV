@@ -106,18 +106,19 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
                     .map { counts -> counts.sumOf { it.count } / 500 }
                     .distinctUntilChanged()
                     .mapLatest { c.db.contentDao().randomFeatured(profile.id) }
-                combine(base, discovery, randomPick) { b, d, random ->
-                    val featured = (d.recommendations + d.newMovies + d.newSeries)
+                combine(base, discovery, randomPick, c.parental.hiddenGroups(profile.id)) { b, d, random, hidden ->
+                    fun List<ContentEntity>.visible() = filter { it.groupTitle !in hidden }
+                    val featured = (d.recommendations + d.newMovies + d.newSeries).visible()
                         .filter { it.logo != null && (it.kind == ContentKind.MOVIE || it.streamRef.isXtreamSeries()) }
                         .distinctBy { it.streamRef }
                         .take(6)
-                        .ifEmpty { random }
+                        .ifEmpty { random.visible() }
                     b.copy(
                         seriesInProgress = d.seriesInProgress,
-                        recommendations = d.recommendations,
+                        recommendations = d.recommendations.visible(),
                         liked = d.liked,
-                        newMovies = d.newMovies,
-                        newSeries = d.newSeries,
+                        newMovies = d.newMovies.visible(),
+                        newSeries = d.newSeries.visible(),
                         featured = featured,
                     )
                 }

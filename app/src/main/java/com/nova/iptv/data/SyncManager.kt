@@ -79,6 +79,12 @@ class SyncManager(
         setState(profileId, null)
     }
 
+    /** Runs a sync and waits for it (background worker). */
+    suspend fun syncAndWait(profileId: Long) {
+        sync(profileId)
+        jobs[profileId]?.join()
+    }
+
     private fun setState(profileId: Long, state: State?) {
         _states.update { if (state == null) it - profileId else it + (profileId to state) }
     }

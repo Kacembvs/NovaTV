@@ -66,6 +66,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -213,6 +214,11 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
         }
 
         exoPlayer.addListener(listener)
+        val languages = container.settings.languages.first()
+        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
+            .setPreferredAudioLanguage(languages.audio)
+            .setPreferredTextLanguage(languages.subtitles)
+            .build()
         exoPlayer.addAnalyticsListener(object : AnalyticsListener {
             override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
                 this@PlayerActivity.droppedFrames += droppedFrames
@@ -354,8 +360,18 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
                 .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, option.trackIndex))
         }
         p.trackSelectionParameters = builder.build()
+        rememberLanguage(type, option?.let { p.currentTracks.groups.getOrNull(it.groupIndex)?.getTrackFormat(it.trackIndex)?.language })
         ui.update { it.copy(panel = null) }
         refreshTracks()
+    }
+
+    /** A choice made in the player becomes the preferred language for the next videos. */
+    private fun rememberLanguage(type: Int, language: String?) {
+        val code = language?.takeIf { it.isNotBlank() && it != "und" && it != C.LANGUAGE_UNDETERMINED }
+        when (type) {
+            C.TRACK_TYPE_AUDIO -> if (code != null) container.appScope.launch { container.settings.setAudioLanguage(code) }
+            C.TRACK_TYPE_TEXT -> container.appScope.launch { container.settings.setSubtitleLanguage(code) }
+        }
     }
 
     override fun selectAudio(option: TrackOption) = selectTrack(C.TRACK_TYPE_AUDIO, option)

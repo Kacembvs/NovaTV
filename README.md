@@ -80,7 +80,7 @@ app/src/main/java/com/nova/iptv/
 
 ## État du projet
 
-Compilation debug vérifiée, 21 tests unitaires OK (sauvegarde/restauration chiffrée, parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, libellés pistes/vitesses, recommandations, migrations de base 1→3 sous Robolectric). Parseur validé
+Compilation debug vérifiée, 25 tests unitaires OK (contrôle parental, worker d'actualisation, sauvegarde/restauration chiffrée, parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, libellés pistes/vitesses, recommandations, migrations de base 1→3 sous Robolectric). Parseur validé
 sur une playlist publique réelle (231 chaînes, 33 catégories).
 
 | Fonction | État |
@@ -120,5 +120,8 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Thèmes NOVA Blue, Cinema Gold, Stream Red, Pure Light, Personnalisé (accent) — changement immédiat | Fait |
 | Picture-in-Picture mobile (auto Android 12+, bouton lecture/pause), désactivable | Fait |
 | Sauvegarde/restauration JSON : profils, favoris, j'aime, reprises, réglages ; mots de passe chiffrés par code (PBKDF2 + AES-GCM) | Fait |
-| Contrôle parental, Google Cast, actualisation WorkManager, préférences de langue | À faire |
+| Contrôle parental : code PIN haché (PBKDF2), catégories masquées partout, réglages protégés | Fait |
+| Langues audio / sous-titres préférées (réglages + mémorisation du choix fait dans le lecteur) | Fait |
+| Actualisation automatique WorkManager toutes les 12 h (playlists + guide), désactivable | Fait |
+| Google Cast, groupes de chaînes personnalisés, tests sur appareils, version release signée (à la demande) | À faire |
 | Tests instrumentés / sur Android TV réelle | À faire |

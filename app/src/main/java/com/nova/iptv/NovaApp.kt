@@ -3,10 +3,12 @@ package com.nova.iptv
 import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import com.nova.iptv.data.RefreshWorker
 import com.nova.iptv.data.ThemeSettings
 import com.nova.iptv.ui.theme.NovaColors
 import com.nova.iptv.ui.theme.NovaPalettes
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -22,6 +24,9 @@ class NovaApp : Application(), ImageLoaderFactory {
         applyTheme(runBlocking { container.settings.theme.first() })
         container.appScope.launch(Dispatchers.Main) {
             container.settings.theme.collect(::applyTheme)
+        }
+        container.appScope.launch {
+            container.settings.autoRefresh.distinctUntilChanged().collect { RefreshWorker.schedule(this@NovaApp, it) }
         }
     }
 

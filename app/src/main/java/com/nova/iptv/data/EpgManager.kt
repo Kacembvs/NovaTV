@@ -106,6 +106,11 @@ class EpgManager(
         setState(profileId, null)
     }
 
+    /** Waits for a running guide refresh, if any (background worker). */
+    suspend fun join(profileId: Long) {
+        jobs[profileId]?.join()
+    }
+
     /** Now / next programme per channel id, refreshed every minute and when the guide changes. */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun nowNext(profileId: Long): Flow<Map<String, NowNext>> = minuteTicker().flatMapLatest { now ->

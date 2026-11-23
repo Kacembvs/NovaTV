@@ -60,13 +60,16 @@ class GuideViewModel(private val c: AppContainer) : ViewModel() {
     val profile: StateFlow<ProfileEntity?> = c.profiles.activeProfile
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val profileId = c.profiles.activeProfile.map { it?.id }.distinctUntilChanged()
+    private val hidden = profileId.flatMapLatest { id -> if (id == null) flowOf(emptySet()) else c.parental.hiddenGroups(id) }
 
     val groups: StateFlow<List<GroupCount>> = profileId
         .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else c.db.contentDao().groups(id, ContentKind.LIVE) }
+        .combine(hidden) { list, h -> list.filter { it.name !in h } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val channels: StateFlow<List<ContentEntity>?> = combine(profileId, group) { id, g -> id to g }
         .flatMapLatest { (id, g) -> if (id == null) flowOf(emptyList()) else c.db.contentDao().guideChannels(id, g) }
+        .combine(hidden) { list, h -> list.filter { it.groupTitle !in h } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val programmes: StateFlow<Map<String, List<EpgProgrammeEntity>>> = profileId

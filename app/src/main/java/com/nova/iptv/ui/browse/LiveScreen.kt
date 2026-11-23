@@ -171,6 +171,8 @@ fun BrowseScaffold(
         SearchField(query, { vm.query.value = it }, searchHint)
         Spacer(Modifier.height(10.dp))
         GroupChips(groups, group, BrowseViewModel.FAVORITES, onSelect = { vm.group.value = it })
+        val hiddenCount by vm.hiddenCount.collectAsStateWithLifecycle()
+        HiddenCategoriesButton(hiddenCount, vm::unlock, Modifier.padding(horizontal = 12.dp))
         Spacer(Modifier.height(6.dp))
         when (val s = sync) {
             is SyncManager.State.Running -> SyncBanner("Chargement de la playlist… ${s.loaded} contenus", isError = false)

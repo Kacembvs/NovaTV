@@ -29,6 +29,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nova.iptv.data.ThemeSettings
+import com.nova.iptv.player.TrackLabels
+import com.nova.iptv.ui.components.PinDialog
+import androidx.compose.foundation.lazy.LazyColumn
 import com.nova.iptv.ui.theme.NovaColors
 import com.nova.iptv.ui.theme.NovaPalettes
 import com.nova.iptv.ui.theme.NovaThemeId
@@ -95,6 +98,143 @@ fun AppearanceCard(settings: ThemeSettings, onTheme: (NovaThemeId, Int?) -> Unit
             }
         }
     }
+}
+
+private val LANGUAGES = listOf("fr", "en", "ar", "es", "de", "it", "pt", "tr")
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun LanguagesCard(vm: ProfilesViewModel) {
+    val languages by vm.languages.collectAsStateWithLifecycle()
+    val autoRefresh by vm.autoRefresh.collectAsStateWithLifecycle()
+    SettingsCard("Langues et actualisation") {
+        Text(
+            "Appliquées automatiquement quand le flux propose ces pistes. Un choix fait dans le lecteur devient la nouvelle préférence.",
+            color = NovaColors.TextSecondary,
+            fontSize = 12.sp,
+        )
+        Text("Audio", fontSize = 15.sp)
+        LanguageChips(languages.audio, "Automatique", vm::setAudioLanguage)
+        Text("Sous-titres", fontSize = 15.sp)
+        LanguageChips(languages.subtitles, "Désactivés", vm::setSubtitleLanguage)
+        HorizontalDivider(color = NovaColors.Border)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Actualisation automatique", fontSize = 15.sp)
+                Text(
+                    "Toutes les 12 h, en arrière-plan : playlists et guide TV, même application fermée (réseau requis, batterie non faible).",
+                    color = NovaColors.TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
+            Switch(checked = autoRefresh, onCheckedChange = vm::setAutoRefresh)
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LanguageChips(current: String?, noneLabel: String, onSelect: (String?) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        FilterChip(selected = current == null, onClick = { onSelect(null) }, label = { Text(noneLabel) })
+        val codes = if (current != null && LANGUAGES.none { it == current.take(2) }) LANGUAGES + current else LANGUAGES
+        codes.forEach { code ->
+            FilterChip(
+                selected = current != null && (current == code || current.take(2) == code),
+                onClick = { onSelect(code) },
+                label = { Text(TrackLabels.language(code) ?: code) },
+            )
+        }
+    }
+}
+
+@Composable
+fun ParentalCard(vm: ProfilesViewModel, activeProfileId: Long?) {
+    val parental by vm.parental.collectAsStateWithLifecycle()
+    val unlocked by vm.parentalUnlocked.collectAsStateWithLifecycle()
+    var dialog by remember { mutableStateOf<String?>(null) }
+    var managing by remember { mutableStateOf(false) }
+
+    SettingsCard("Contrôle parental") {
+        if (!parental.pinSet) {
+            Text(
+                "Définissez un code PIN pour masquer des catégories (chaînes, films, séries) et protéger les réglages.",
+                color = NovaColors.TextSecondary,
+                fontSize = 12.sp,
+            )
+            Button(onClick = { dialog = "create" }) { Text("Définir un code PIN") }
+        } else {
+            val count = activeProfileId?.let { vm.lockedGroups(parental, it).size } ?: 0
+            Text(
+                "$count catégorie(s) verrouillée(s) pour ce profil. " +
+                    if (unlocked) "Contenus protégés visibles jusqu'au reverrouillage." else "Contenus protégés masqués.",
+                color = NovaColors.TextSecondary,
+                fontSize = 12.sp,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Protéger les réglages", fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Switch(checked = parental.lockSettings, onCheckedChange = vm::setLockSettings)
+            }
+            FlowRowCompat {
+                FilledTonalButton(onClick = { if (unlocked) managing = true else dialog = "manage" }, enabled = activeProfileId != null) {
+                    Text("Catégories verrouillées")
+                }
+                if (unlocked) OutlinedButton(onClick = vm::relock) { Text("Reverrouiller") }
+                TextButton(onClick = { dialog = "change" }) { Text("Changer le code") }
+                TextButton(onClick = { dialog = "remove" }) { Text("Supprimer le code", color = NovaColors.Error) }
+            }
+        }
+    }
+
+    when (dialog) {
+        "create" -> PinDialog("Nouveau code PIN", "4 à 8 chiffres.", confirm = true, onDismiss = { dialog = null }) { pin ->
+            vm.setPin(pin); dialog = null; null
+        }
+        "manage" -> PinDialog("Contrôle parental", "Saisissez le code PIN.", onDismiss = { dialog = null }) { pin ->
+            if (vm.verifyPin(pin)) { dialog = null; managing = true; null } else "Code incorrect."
+        }
+        "change" -> PinDialog("Code actuel", null, onDismiss = { dialog = null }) { pin ->
+            if (vm.verifyPin(pin)) { dialog = "create"; null } else "Code incorrect."
+        }
+        "remove" -> PinDialog("Supprimer le code", "Toutes les protections seront retirées.", onDismiss = { dialog = null }) { pin ->
+            if (vm.verifyPin(pin)) { vm.removePin(); dialog = null; null } else "Code incorrect."
+        }
+    }
+
+    if (managing && activeProfileId != null) {
+        val groups by produceState<List<com.nova.iptv.data.db.GroupCount>?>(null, activeProfileId) { value = vm.allGroups(activeProfileId) }
+        val locked = vm.lockedGroups(parental, activeProfileId)
+        AlertDialog(
+            onDismissRequest = { managing = false },
+            title = { Text("Catégories verrouillées") },
+            text = {
+                val list = groups
+                when {
+                    list == null -> CircularProgressIndicator()
+                    list.isEmpty() -> Text("Ce profil n'a pas encore de catégories.")
+                    else -> LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                        items(list, key = { it.name }) { g ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Checkbox(
+                                    checked = g.name in locked,
+                                    onCheckedChange = { vm.setGroupLocked(activeProfileId, g.name, it) },
+                                )
+                                Text(g.name, modifier = Modifier.weight(1f), maxLines = 1)
+                                Text("${g.count}", color = NovaColors.TextSecondary, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { managing = false }) { Text("Terminé") } },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FlowRowCompat(content: @Composable () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { content() }
 }
 
 @Composable

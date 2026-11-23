@@ -77,17 +77,20 @@ interface ContentDao {
     @Query(
         "SELECT * FROM contents WHERE profileId = :profileId AND kind = :kind " +
             "AND (:group IS NULL OR groupTitle = :group) AND name LIKE '%' || :query || '%' " +
-            "ORDER BY sortIndex"
+            "AND groupTitle NOT IN (:hidden) ORDER BY sortIndex"
     )
-    fun page(profileId: Long, kind: ContentKind, group: String?, query: String): PagingSource<Int, ContentEntity>
+    fun page(profileId: Long, kind: ContentKind, group: String?, query: String, hidden: List<String>): PagingSource<Int, ContentEntity>
 
     @Query(
         "SELECT c.* FROM contents c INNER JOIN favorites f " +
             "ON f.profileId = c.profileId AND f.itemKey = c.streamRef " +
             "WHERE c.profileId = :profileId AND c.kind = :kind AND c.name LIKE '%' || :query || '%' " +
-            "ORDER BY c.sortIndex"
+            "AND c.groupTitle NOT IN (:hidden) ORDER BY c.sortIndex"
     )
-    fun pageFavorites(profileId: Long, kind: ContentKind, query: String): PagingSource<Int, ContentEntity>
+    fun pageFavorites(profileId: Long, kind: ContentKind, query: String, hidden: List<String>): PagingSource<Int, ContentEntity>
+
+    @Query("SELECT groupTitle AS name, COUNT(*) AS count FROM contents WHERE profileId = :profileId GROUP BY groupTitle ORDER BY groupTitle")
+    suspend fun allGroups(profileId: Long): List<GroupCount>
 
     @Query(
         "SELECT groupTitle AS name, COUNT(*) AS count FROM contents " +
@@ -152,9 +155,9 @@ interface ContentDao {
 
     @Query(
         "SELECT * FROM contents WHERE profileId = :profileId AND kind = :kind " +
-            "AND name LIKE '%' || :query || '%' ORDER BY sortIndex LIMIT :limit"
+            "AND name LIKE '%' || :query || '%' AND groupTitle NOT IN (:hidden) ORDER BY sortIndex LIMIT :limit"
     )
-    suspend fun search(profileId: Long, kind: ContentKind, query: String, limit: Int): List<ContentEntity>
+    suspend fun search(profileId: Long, kind: ContentKind, query: String, limit: Int, hidden: List<String>): List<ContentEntity>
 }
 
 @Dao

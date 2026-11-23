@@ -6,6 +6,7 @@ import com.nova.iptv.core.NovaHttp
 import com.nova.iptv.data.BackupManager
 import com.nova.iptv.data.EpgManager
 import com.nova.iptv.data.LibraryRepository
+import com.nova.iptv.data.ParentalControl
 import com.nova.iptv.data.PlaybackQueue
 import com.nova.iptv.data.ProfileRepository
 import com.nova.iptv.data.SettingsStore
@@ -33,5 +34,6 @@ class AppContainer(context: Context) {
     val sync = SyncManager(db, profiles, http, xtream, appScope, onSynced = epg::refresh)
     val playbackQueue = PlaybackQueue()
     val library = LibraryRepository(db)
+    val parental = ParentalControl(settings)
     val backup = BackupManager(db, cipher, settings)
 }

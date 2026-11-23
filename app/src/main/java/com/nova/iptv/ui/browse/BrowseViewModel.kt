@@ -37,9 +37,20 @@ class BrowseViewModel(private val c: AppContainer, val kind: ContentKind) : View
 
     private val profileId = c.profiles.activeProfile.map { it?.id }.distinctUntilChanged()
 
+    /** Categories hidden by the parental control (empty when unlocked). */
+    private val hidden: Flow<Set<String>> = profileId
+        .flatMapLatest { id -> if (id == null) flowOf(emptySet()) else c.parental.hiddenGroups(id) }
+
+    /** Number of hidden categories, to offer unlocking. */
+    val hiddenCount: StateFlow<Int> = hidden.map { it.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
     val groups: StateFlow<List<GroupCount>> = profileId
         .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else c.db.contentDao().groups(id, kind) }
+        .combine(hidden) { list, h -> list.filter { it.name !in h } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    suspend fun unlock(pin: String): Boolean = c.parental.verify(pin)
 
     val favoriteKeys: StateFlow<Set<String>> = profileId
         .flatMapLatest { id -> if (id == null) flowOf(emptySet()) else c.db.libraryDao().favoriteKeys(id).map { it.toSet() } }
@@ -70,18 +81,21 @@ class BrowseViewModel(private val c: AppContainer, val kind: ContentKind) : View
         profileId,
         group,
         query.debounce(250).map { it.trim() }.distinctUntilChanged(),
-    ) { id, g, q -> Triple(id, g, q) }
-        .flatMapLatest { (id, g, q) ->
+        hidden,
+    ) { id, g, q, h -> Params(id, g, q, h.toList()) }
+        .flatMapLatest { (id, g, q, h) ->
             if (id == null) {
                 flowOf(PagingData.empty())
             } else {
                 val dao = c.db.contentDao()
                 Pager(PagingConfig(pageSize = 60, prefetchDistance = 30, enablePlaceholders = false)) {
-                    if (g == FAVORITES) dao.pageFavorites(id, kind, q) else dao.page(id, kind, g, q)
+                    if (g == FAVORITES) dao.pageFavorites(id, kind, q, h) else dao.page(id, kind, g, q, h)
                 }.flow
             }
         }
         .cachedIn(viewModelScope)
+
+    private data class Params(val id: Long?, val group: String?, val query: String, val hidden: List<String>)
 
     fun toggleFavorite(item: ContentEntity) {
         viewModelScope.launch {
