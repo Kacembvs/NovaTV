@@ -23,7 +23,34 @@ data class ProfileEntity(
     val lastSyncError: String? = null,
     val contentCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
+    /** User-provided XMLTV URL; overrides the playlist header / Xtream xmltv.php. */
+    val customEpgUrl: String? = null,
+    val epgSyncedAt: Long? = null,
+    val epgError: String? = null,
 )
+
+@Entity(
+    tableName = "epg_programmes",
+    primaryKeys = ["profileId", "channelId", "startMs"],
+    foreignKeys = [ForeignKey(
+        entity = ProfileEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["profileId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+    indices = [Index("profileId", "endMs")],
+)
+data class EpgProgrammeEntity(
+    val profileId: Long,
+    /** Matches [ContentEntity.tvgId]. */
+    val channelId: String,
+    val startMs: Long,
+    val endMs: Long,
+    val title: String,
+    val description: String?,
+)
+
+data class IdName(val id: Long, val name: String)
 
 @Entity(
     tableName = "contents",

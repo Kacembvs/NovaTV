@@ -29,6 +29,7 @@ import com.nova.iptv.domain.ContentKind
 import com.nova.iptv.ui.browse.CatalogScreen
 import com.nova.iptv.ui.browse.LiveScreen
 import com.nova.iptv.ui.components.NovaLogo
+import com.nova.iptv.ui.guide.GuideScreen
 import com.nova.iptv.ui.home.HomeScreen
 import com.nova.iptv.ui.profiles.ProfileEditScreen
 import com.nova.iptv.ui.profiles.ProfilesScreen
@@ -104,7 +105,8 @@ private fun NovaNavHost(nav: NavHostController, goToTab: (String) -> Unit, modif
 
     NavHost(nav, startDestination = "home", modifier = modifier) {
         composable("home") { HomeScreen(onNavigate = goToTab, onAddProfile = addProfile, onOpenSeries = openSeries) }
-        composable("live") { LiveScreen(onAddProfile = addProfile) }
+        composable("live") { LiveScreen(onAddProfile = addProfile, onOpenGuide = { nav.navigate("guide") }) }
+        composable("guide") { GuideScreen(onBack = { nav.popBackStack() }) }
         composable("movies") { CatalogScreen(ContentKind.MOVIE, onOpenSeries = openSeries, onAddProfile = addProfile) }
         composable("series") { CatalogScreen(ContentKind.SERIES, onOpenSeries = openSeries, onAddProfile = addProfile) }
         composable("profiles") {

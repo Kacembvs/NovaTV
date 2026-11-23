@@ -12,12 +12,17 @@ import com.nova.iptv.ui.LocalAppContainer
 import com.nova.iptv.ui.NovaAppUi
 import com.nova.iptv.ui.theme.NovaColors
 import com.nova.iptv.ui.theme.NovaTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val container = (application as NovaApp).container
+        container.appScope.launch {
+            container.profiles.activeProfile.first()?.let { container.epg.refreshIfStale(it.id) }
+        }
         setContent {
             NovaTheme {
                 CompositionLocalProvider(LocalAppContainer provides container) {

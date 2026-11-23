@@ -80,7 +80,7 @@ app/src/main/java/com/nova/iptv/
 
 ## État du projet
 
-Compilation debug vérifiée, 10 tests unitaires OK (parseur M3U, URLs Xtream, règles autoplay/sommeil). Parseur validé
+Compilation debug vérifiée, 13 tests unitaires OK (parseurs M3U et XMLTV, URLs Xtream, règles autoplay/sommeil, migration de base 1→2 sous Robolectric). Parseur validé
 sur une playlist publique réelle (231 chaînes, 33 catégories).
 
 | Fonction | État |
@@ -101,6 +101,9 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Mode sommeil prioritaire : fin de l'épisode, fin du film, 15/30/45/60 min (arrêt + sauvegarde) | Fait |
 | Réglages de lecture (onglet Réglages) | Fait |
 | Saut automatique du générique | Non fait : aucune donnée fiable (chapitres) fournie par les flux IPTV |
-| EPG XMLTV | À faire |
+| Guide TV XMLTV (.xml / .xml.gz) en streaming : url-tvg, xmltv.php Xtream ou adresse personnalisée | Fait |
+| Association chaîne/EPG par tvg-id puis par nom (89/231 chaînes iptv-org FR retrouvées avec xmltvfr.fr) | Fait |
+| Programme en cours/suivant (liste des chaînes et lecteur), grille Guide TV 12 h | Fait |
+| Actualisation du guide après chaque synchro et au démarrage si > 12 h | Fait (sans WorkManager) |
 | Gestes luminosité/volume, verrouillage écran, thèmes, recommandations | À faire |
 | Tests instrumentés / sur Android TV réelle | À faire |

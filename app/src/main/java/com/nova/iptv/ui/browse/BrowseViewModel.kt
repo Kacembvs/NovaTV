@@ -8,6 +8,7 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import com.nova.iptv.AppContainer
+import com.nova.iptv.data.NowNext
 import com.nova.iptv.data.SyncManager
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.data.db.FavoriteEntity
@@ -44,6 +45,11 @@ class BrowseViewModel(private val c: AppContainer, val kind: ContentKind) : View
 
     val syncState: StateFlow<SyncManager.State?> = combine(profileId, c.sync.states) { id, states -> id?.let { states[it] } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Now / next programmes keyed by channel EPG id (live only). */
+    val epg: StateFlow<Map<String, NowNext>> = profileId
+        .flatMapLatest { id -> if (id == null || kind != ContentKind.LIVE) flowOf(emptyMap()) else c.epg.nowNext(id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     val items: Flow<PagingData<ContentEntity>> = combine(
         profileId,

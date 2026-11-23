@@ -18,3 +18,9 @@ fun formatDuration(ms: Long): String {
     val seconds = totalSeconds % 60
     return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
 }
+
+private val clockFormat = object : ThreadLocal<java.text.SimpleDateFormat>() {
+    override fun initialValue() = java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE)
+}
+
+fun formatClock(ms: Long): String = clockFormat.get()!!.format(java.util.Date(ms))

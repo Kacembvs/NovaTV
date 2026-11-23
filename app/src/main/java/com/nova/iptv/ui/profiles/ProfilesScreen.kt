@@ -23,6 +23,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.nova.iptv.AppContainer
+import com.nova.iptv.data.EpgManager
 import com.nova.iptv.data.PlaybackSettings
 import com.nova.iptv.data.SyncManager
 import com.nova.iptv.data.db.ProfileEntity
@@ -45,6 +46,7 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
     val activeId: StateFlow<Long?> = c.profiles.activeProfile.map { it?.id }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val syncStates = c.sync.states
+    val epgStates = c.epg.states
     val playback: StateFlow<PlaybackSettings> = c.settings.playback
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlaybackSettings())
 
@@ -52,8 +54,10 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
     fun setCountdown(seconds: Int) = viewModelScope.launch { c.settings.setCountdownSeconds(seconds) }
     fun activate(id: Long) = viewModelScope.launch { c.profiles.setActive(id) }
     fun refresh(id: Long) = c.sync.sync(id)
+    fun refreshGuide(id: Long) = c.epg.refresh(id)
     fun delete(id: Long) {
         c.sync.cancel(id)
+        c.epg.cancel(id)
         viewModelScope.launch { c.profiles.delete(id) }
     }
 }
@@ -64,6 +68,7 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
     val profiles by vm.profiles.collectAsStateWithLifecycle()
     val activeId by vm.activeId.collectAsStateWithLifecycle()
     val syncStates by vm.syncStates.collectAsStateWithLifecycle()
+    val epgStates by vm.epgStates.collectAsStateWithLifecycle()
     val playback by vm.playback.collectAsStateWithLifecycle()
     var toDelete by remember { mutableStateOf<ProfileEntity?>(null) }
 
@@ -99,8 +104,10 @@ fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
                 profile = profile,
                 active = profile.id == activeId,
                 sync = syncStates[profile.id],
+                epg = epgStates[profile.id],
                 onActivate = { vm.activate(profile.id) },
                 onRefresh = { vm.refresh(profile.id) },
+                onRefreshGuide = { vm.refreshGuide(profile.id) },
                 onEdit = { onEdit(profile.id) },
                 onDelete = { toDelete = profile },
             )
@@ -173,8 +180,10 @@ private fun ProfileCard(
     profile: ProfileEntity,
     active: Boolean,
     sync: SyncManager.State?,
+    epg: EpgManager.State?,
     onActivate: () -> Unit,
     onRefresh: () -> Unit,
+    onRefreshGuide: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -205,9 +214,22 @@ private fun ProfileCard(
             }
             val isError = sync is SyncManager.State.Failed || (sync == null && profile.lastSyncError != null)
             Text(status, fontSize = 13.sp, color = if (isError) NovaColors.Error else NovaColors.TextSecondary)
+            val guide = when {
+                epg is EpgManager.State.Running -> "Guide TV : chargement… ${epg.programmes} programmes"
+                epg is EpgManager.State.Failed -> "Guide TV : ${epg.message}"
+                profile.epgError != null -> "Guide TV : ${profile.epgError}"
+                profile.epgSyncedAt != null -> "Guide TV actualisé " +
+                    DateUtils.getRelativeTimeSpanString(profile.epgSyncedAt).toString().lowercase()
+                else -> "Guide TV : pas encore chargé"
+            }
+            val guideError = epg is EpgManager.State.Failed || (epg == null && profile.epgError != null)
+            Text(guide, fontSize = 13.sp, color = if (guideError) NovaColors.Error else NovaColors.TextSecondary)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
                 if (!active) FilledTonalButton(onClick = onActivate) { Text("Utiliser") }
                 TextButton(onClick = onRefresh, enabled = sync !is SyncManager.State.Running) { Text("Actualiser") }
+                TextButton(onClick = onRefreshGuide, enabled = epg !is EpgManager.State.Running) { Text("Guide TV") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = onEdit) { Text("Modifier") }
                 TextButton(onClick = onDelete) { Text("Supprimer", color = NovaColors.Error) }
             }
@@ -221,6 +243,7 @@ data class ProfileForm(
     val url: String = "",
     val username: String = "",
     val password: String = "",
+    val epgUrl: String = "",
     val hasStoredPassword: Boolean = false,
     val error: String? = null,
     val saving: Boolean = false,
@@ -241,6 +264,7 @@ class ProfileEditViewModel(private val c: AppContainer, private val profileId: L
                         name = p.name,
                         url = p.url,
                         username = p.username.orEmpty(),
+                        epgUrl = p.customEpgUrl.orEmpty(),
                         hasStoredPassword = p.encryptedPassword != null,
                     )
                 }
@@ -261,6 +285,7 @@ class ProfileEditViewModel(private val c: AppContainer, private val profileId: L
             f.type == ProfileType.M3U && url.toHttpUrlOrNull() == null -> "Adresse invalide : elle doit commencer par http:// ou https://"
             f.type == ProfileType.XTREAM && f.username.isBlank() -> "Indiquez le nom d'utilisateur."
             f.type == ProfileType.XTREAM && f.password.isEmpty() && !f.hasStoredPassword -> "Indiquez le mot de passe."
+            f.epgUrl.isNotBlank() && f.epgUrl.trim().toHttpUrlOrNull() == null -> "Adresse du guide TV invalide."
             else -> null
         }
         if (error != null) {
@@ -272,7 +297,7 @@ class ProfileEditViewModel(private val c: AppContainer, private val profileId: L
             val name = f.name.ifBlank {
                 ("http://" + url.removePrefix("http://").removePrefix("https://")).toHttpUrlOrNull()?.host ?: "Mon profil"
             }
-            val id = c.profiles.save(profileId, f.type, name, url, f.username, f.password)
+            val id = c.profiles.save(profileId, f.type, name, url, f.username, f.password, f.epgUrl)
             c.sync.sync(id)
             onSaved()
         }
@@ -354,6 +379,23 @@ fun ProfileEditScreen(profileId: Long?, onDone: () -> Unit) {
             }
         }
         f.error?.let { item { Text(it, color = NovaColors.Error, fontSize = 14.sp) } }
+        item {
+            OutlinedTextField(
+                value = f.epgUrl,
+                onValueChange = { v -> vm.update { copy(epgUrl = v) } },
+                label = { Text("Guide TV XMLTV (facultatif)") },
+                placeholder = { Text("https://exemple.com/guide.xml.gz") },
+                supportingText = {
+                    Text(
+                        if (f.type == ProfileType.M3U) "Vide : guide indiqué dans la playlist (url-tvg)."
+                        else "Vide : guide fourni par le serveur Xtream."
+                    )
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         item {
             Text(
                 "Le mot de passe est chiffré sur l'appareil (Android Keystore). Le catalogue est chargé progressivement : " +

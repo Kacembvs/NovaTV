@@ -33,6 +33,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.nova.iptv.NovaApp
+import com.nova.iptv.core.formatClock
 import com.nova.iptv.data.PlaybackQueue
 import com.nova.iptv.data.db.HistoryEntity
 import com.nova.iptv.domain.ContentKind
@@ -65,6 +66,9 @@ data class PlayerUiState(
     val sleep: SleepMode = SleepMode.Off,
     val sleepPanelVisible: Boolean = false,
     val sleepStopped: Boolean = false,
+    /** Live only: current and next programme from the XMLTV guide. */
+    val programme: String? = null,
+    val nextProgramme: String? = null,
 ) {
     val isLive get() = kind == ContentKind.LIVE
 }
@@ -104,6 +108,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     private var bannerJob: Job? = null
     private var nextUpJob: Job? = null
     private var sleepJob: Job? = null
+    private var epgJob: Job? = null
 
     private var liveRetries = 0
     private val hlsFallbackTried = HashSet<Int>()
@@ -228,6 +233,7 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
             ui.update { it.copy(error = null, nextUp = null, endScreen = null) }
             updateTitle()
             showBanner()
+            refreshProgramme()
             if (currentItem()?.kind == ContentKind.LIVE) saveProgress()
         }
 
@@ -465,6 +471,34 @@ class PlayerActivity : ComponentActivity(), PlayerActions {
     }
 
     private fun currentItem(): PlayableItem? = exo?.let { session.items.getOrNull(it.currentMediaItemIndex) }
+
+    /** Looks up the channel's EPG id, then refreshes the now/next programme every minute. */
+    private fun refreshProgramme() {
+        epgJob?.cancel()
+        val item = currentItem()
+        if (item == null || item.kind != ContentKind.LIVE) {
+            ui.update { it.copy(programme = null, nextProgramme = null) }
+            return
+        }
+        epgJob = lifecycleScope.launch {
+            while (isActive) {
+                val now = System.currentTimeMillis()
+                val programmes = withContext(Dispatchers.IO) {
+                    val epgId = container.db.contentDao().getByRef(session.profileId, item.ref)?.tvgId
+                    if (epgId == null) emptyList() else container.db.epgDao().upcoming(session.profileId, epgId, now, 2)
+                }
+                val current = programmes.firstOrNull { it.startMs <= now }
+                val next = programmes.firstOrNull { it.startMs > now }
+                ui.update {
+                    it.copy(
+                        programme = current?.let { p -> "${formatClock(p.startMs)}–${formatClock(p.endMs)}  ${p.title}" },
+                        nextProgramme = next?.let { p -> "Ensuite ${formatClock(p.startMs)}  ${p.title}" },
+                    )
+                }
+                delay(60_000)
+            }
+        }
+    }
 
     private fun updateTitle() {
         val item = currentItem() ?: session.items[session.startIndex]

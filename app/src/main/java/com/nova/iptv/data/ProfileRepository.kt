@@ -33,6 +33,7 @@ class ProfileRepository(
         url: String,
         username: String,
         password: String,
+        customEpgUrl: String = "",
     ): Long {
         val existing = id?.let { dao.get(it) }
         val encryptedPassword = when {
@@ -52,6 +53,9 @@ class ProfileRepository(
             lastSyncError = existing?.lastSyncError,
             contentCount = existing?.contentCount ?: 0,
             createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+            customEpgUrl = customEpgUrl.trim().ifEmpty { null },
+            epgSyncedAt = existing?.epgSyncedAt,
+            epgError = existing?.epgError,
         )
         return if (existing == null) {
             dao.insert(profile).also { settings.setActiveProfile(it) }

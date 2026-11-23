@@ -179,6 +179,7 @@ fun GroupChips(
     selected: String?,
     favoritesKey: String,
     onSelect: (String?) -> Unit,
+    showFavorites: Boolean = true,
 ) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 20.dp),
@@ -187,7 +188,7 @@ fun GroupChips(
         item(key = "all") {
             FilterChip(selected = selected == null, onClick = { onSelect(null) }, label = { Text("Tout") })
         }
-        item(key = "fav") {
+        if (showFavorites) item(key = "fav") {
             FilterChip(
                 selected = selected == favoritesKey,
                 onClick = { onSelect(favoritesKey) },

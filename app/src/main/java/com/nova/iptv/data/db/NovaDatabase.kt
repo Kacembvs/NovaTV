@@ -6,6 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.nova.iptv.domain.ContentKind
 import com.nova.iptv.domain.ProfileType
 
@@ -17,18 +19,45 @@ class Converters {
 }
 
 @Database(
-    entities = [ProfileEntity::class, ContentEntity::class, FavoriteEntity::class, HistoryEntity::class],
-    version = 1,
-    exportSchema = false,
+    entities = [
+        ProfileEntity::class,
+        ContentEntity::class,
+        FavoriteEntity::class,
+        HistoryEntity::class,
+        EpgProgrammeEntity::class,
+    ],
+    version = 2,
+    exportSchema = true,
 )
 @TypeConverters(Converters::class)
 abstract class NovaDatabase : RoomDatabase() {
     abstract fun profileDao(): ProfileDao
     abstract fun contentDao(): ContentDao
     abstract fun libraryDao(): LibraryDao
+    abstract fun epgDao(): EpgDao
 
     companion object {
+        /** v2: XMLTV guide (custom EPG URL, EPG sync status, programmes table). */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `profiles` ADD COLUMN `customEpgUrl` TEXT")
+                db.execSQL("ALTER TABLE `profiles` ADD COLUMN `epgSyncedAt` INTEGER")
+                db.execSQL("ALTER TABLE `profiles` ADD COLUMN `epgError` TEXT")
+                db.execSQL(EPG_TABLE_SQL)
+                db.execSQL(EPG_INDEX_SQL)
+            }
+        }
+
+        const val EPG_TABLE_SQL = "CREATE TABLE IF NOT EXISTS `epg_programmes` (`profileId` INTEGER NOT NULL, " +
+            "`channelId` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, `title` TEXT NOT NULL, " +
+            "`description` TEXT, PRIMARY KEY(`profileId`, `channelId`, `startMs`), FOREIGN KEY(`profileId`) " +
+            "REFERENCES `profiles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+        const val EPG_INDEX_SQL =
+            "CREATE INDEX IF NOT EXISTS `index_epg_programmes_profileId_endMs` ON `epg_programmes` (`profileId`, `endMs`)"
+
         fun create(context: Context): NovaDatabase =
-            Room.databaseBuilder(context, NovaDatabase::class.java, "nova.db").build()
+            Room.databaseBuilder(context, NovaDatabase::class.java, "nova.db")
+                .addMigrations(MIGRATION_1_2)
+                .build()
     }
 }

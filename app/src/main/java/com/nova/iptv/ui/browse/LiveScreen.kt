@@ -3,7 +3,12 @@ package com.nova.iptv.ui.browse
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CalendarViewWeek
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,6 +25,8 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
+import com.nova.iptv.core.formatClock
+import com.nova.iptv.data.NowNext
 import com.nova.iptv.data.SyncManager
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.domain.ContentKind
@@ -28,10 +35,23 @@ import com.nova.iptv.ui.novaViewModel
 import com.nova.iptv.ui.theme.NovaColors
 
 @Composable
-fun LiveScreen(onAddProfile: () -> Unit) {
+fun LiveScreen(onAddProfile: () -> Unit, onOpenGuide: () -> Unit) {
     val vm = novaViewModel(key = "live") { BrowseViewModel(it, ContentKind.LIVE) }
     val context = LocalContext.current
-    BrowseScaffold(vm, title = "TV en direct", searchHint = "Rechercher une chaîne", onAddProfile = onAddProfile) { items, favorites ->
+    val epg by vm.epg.collectAsStateWithLifecycle()
+    BrowseScaffold(
+        vm,
+        title = "TV en direct",
+        searchHint = "Rechercher une chaîne",
+        onAddProfile = onAddProfile,
+        headerAction = {
+            FilledTonalButton(onClick = onOpenGuide) {
+                Icon(Icons.Rounded.CalendarViewWeek, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Guide TV")
+            }
+        },
+    ) { items, favorites ->
         LazyColumn(
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -41,6 +61,7 @@ fun LiveScreen(onAddProfile: () -> Unit) {
                 val channel = items[index] ?: return@items
                 ChannelRow(
                     channel = channel,
+                    programmes = channel.tvgId?.let { epg[it] },
                     isFavorite = channel.streamRef in favorites,
                     onClick = { vm.play(context, channel) },
                     onToggleFavorite = { vm.toggleFavorite(channel) },
@@ -51,7 +72,13 @@ fun LiveScreen(onAddProfile: () -> Unit) {
 }
 
 @Composable
-private fun ChannelRow(channel: ContentEntity, isFavorite: Boolean, onClick: () -> Unit, onToggleFavorite: () -> Unit) {
+private fun ChannelRow(
+    channel: ContentEntity,
+    programmes: NowNext?,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    onToggleFavorite: () -> Unit,
+) {
     NovaCard(onClick = onClick, modifier = Modifier.fillMaxWidth(), focusScale = 1.02f) {
         Row(
             Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -65,9 +92,35 @@ private fun ChannelRow(channel: ContentEntity, isFavorite: Boolean, onClick: () 
                 modifier = Modifier.size(width = 64.dp, height = 44.dp).clip(RoundedCornerShape(8.dp)),
                 placeholderSize = 18,
             )
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(channel.name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(channel.groupTitle, color = NovaColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val now = programmes?.now
+                if (now != null) {
+                    Text(
+                        "${formatClock(now.startMs)}–${formatClock(now.endMs)}  ${now.title}",
+                        color = NovaColors.TextPrimary.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val progress = ((System.currentTimeMillis() - now.startMs).toFloat() / (now.endMs - now.startMs)).coerceIn(0f, 1f)
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        trackColor = NovaColors.Border,
+                    )
+                    programmes.next?.let { next ->
+                        Text(
+                            "Ensuite ${formatClock(next.startMs)}  ${next.title}",
+                            color = NovaColors.TextSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                } else {
+                    Text(channel.groupTitle, color = NovaColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             FavoriteButton(isFavorite, onToggleFavorite)
         }
@@ -81,6 +134,7 @@ fun BrowseScaffold(
     title: String,
     searchHint: String,
     onAddProfile: () -> Unit,
+    headerAction: (@Composable () -> Unit)? = null,
     content: @Composable (LazyPagingItems<ContentEntity>, Set<String>) -> Unit,
 ) {
     val profileLoad by vm.profile.collectAsStateWithLifecycle()
@@ -104,10 +158,13 @@ fun BrowseScaffold(
     val items = vm.items.collectAsLazyPagingItems()
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(title, subtitle = profile.name)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(end = 20.dp)) {
+            ScreenHeader(title, subtitle = profile.name, modifier = Modifier.weight(1f))
+            headerAction?.invoke()
+        }
         SearchField(query, { vm.query.value = it }, searchHint)
         Spacer(Modifier.height(10.dp))
-        GroupChips(groups, group, BrowseViewModel.FAVORITES) { vm.group.value = it }
+        GroupChips(groups, group, BrowseViewModel.FAVORITES, onSelect = { vm.group.value = it })
         Spacer(Modifier.height(6.dp))
         when (val s = sync) {
             is SyncManager.State.Running -> SyncBanner("Chargement de la playlist… ${s.loaded} contenus", isError = false)

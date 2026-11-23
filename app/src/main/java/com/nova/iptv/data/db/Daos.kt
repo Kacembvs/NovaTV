@@ -34,6 +34,33 @@ interface ProfileDao {
 
     @Query("UPDATE profiles SET epgUrl = :epgUrl WHERE id = :id")
     suspend fun setEpgUrl(id: Long, epgUrl: String?)
+
+    @Query("UPDATE profiles SET epgSyncedAt = :at, epgError = NULL WHERE id = :id")
+    suspend fun markEpgSynced(id: Long, at: Long)
+
+    @Query("UPDATE profiles SET epgError = :error WHERE id = :id")
+    suspend fun markEpgFailed(id: Long, error: String)
+}
+
+@Dao
+interface EpgDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<EpgProgrammeEntity>)
+
+    @Query("DELETE FROM epg_programmes WHERE profileId = :profileId")
+    suspend fun deleteForProfile(profileId: Long)
+
+    @Query(
+        "SELECT * FROM epg_programmes WHERE profileId = :profileId AND endMs > :from AND startMs < :to " +
+            "ORDER BY channelId, startMs"
+    )
+    fun window(profileId: Long, from: Long, to: Long): Flow<List<EpgProgrammeEntity>>
+
+    @Query(
+        "SELECT * FROM epg_programmes WHERE profileId = :profileId AND channelId = :channelId AND endMs > :from " +
+            "ORDER BY startMs LIMIT :limit"
+    )
+    suspend fun upcoming(profileId: Long, channelId: String, from: Long, limit: Int): List<EpgProgrammeEntity>
 }
 
 @Dao
@@ -76,6 +103,22 @@ interface ContentDao {
 
     @Query("SELECT * FROM contents WHERE profileId = :profileId AND streamRef = :ref LIMIT 1")
     suspend fun getByRef(profileId: Long, ref: String): ContentEntity?
+
+    @Query("SELECT DISTINCT tvgId FROM contents WHERE profileId = :profileId AND kind = 'LIVE' AND tvgId IS NOT NULL")
+    suspend fun liveEpgIds(profileId: Long): List<String>
+
+    @Query("SELECT id, name FROM contents WHERE profileId = :profileId AND kind = 'LIVE' AND tvgId IS NULL")
+    suspend fun liveWithoutEpgId(profileId: Long): List<IdName>
+
+    @Query("UPDATE contents SET tvgId = :tvgId WHERE id = :id")
+    suspend fun setTvgId(id: Long, tvgId: String)
+
+    @Query(
+        "SELECT * FROM contents WHERE profileId = :profileId AND kind = 'LIVE' " +
+            "AND tvgId IN (SELECT DISTINCT channelId FROM epg_programmes WHERE profileId = :profileId) " +
+            "AND (:group IS NULL OR groupTitle = :group) ORDER BY sortIndex LIMIT 3000"
+    )
+    fun guideChannels(profileId: Long, group: String?): Flow<List<ContentEntity>>
 }
 
 @Dao

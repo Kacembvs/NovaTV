@@ -109,7 +109,11 @@ private fun TopBar(state: PlayerUiState, actions: PlayerActions) {
                 }
                 Text(state.title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            state.subtitle?.let { Text(it, color = NovaColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            val secondLine = if (state.isLive) state.programme ?: state.subtitle else state.subtitle
+            secondLine?.let { Text(it, color = NovaColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            if (state.isLive) {
+                state.nextProgramme?.let { Text(it, color = NovaColors.TextSecondary.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
         }
         sleepLabel(state.sleep, state.kind)?.let {
             Text(it, color = NovaColors.Cyan, fontSize = 12.sp, modifier = Modifier.padding(end = 4.dp))

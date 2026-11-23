@@ -36,6 +36,8 @@ class SyncManager(
     private val http: OkHttpClient,
     private val xtream: XtreamClient,
     private val scope: CoroutineScope,
+    /** Called after a successful catalogue sync (used to refresh the EPG). */
+    private val onSynced: (Long) -> Unit = {},
 ) {
     sealed interface State {
         data class Running(val loaded: Int) : State
@@ -59,6 +61,7 @@ class SyncManager(
                 }
                 db.profileDao().markSynced(profileId, System.currentTimeMillis(), count)
                 setState(profileId, null)
+                onSynced(profileId)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
