@@ -309,7 +309,6 @@ struct SystemPlayerView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
-        vc.contextualActions = controller.actions
         if vc.player !== controller.player { vc.player = controller.player }
     }
 }
@@ -340,6 +339,13 @@ struct PlayerScreen: View {
                         .lineLimit(1)
                         .shadow(radius: 4)
                     Spacer()
+                    if controller.index > 0 && controller.isLive {
+                        PlayerChromeButton(systemImage: "chevron.left", label: "Chaîne précédente") { controller.previous() }
+                    }
+                    if controller.hasNext {
+                        PlayerChromeButton(systemImage: controller.isLive ? "chevron.right" : "forward.end.fill",
+                                           label: controller.isLive ? "Chaîne suivante" : "Suivant") { controller.next() }
+                    }
                     Menu {
                         Section("Minuteur de sommeil") {
                             Button("Désactivé") { controller.setSleep(.off) }
