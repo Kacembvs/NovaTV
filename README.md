@@ -207,6 +207,26 @@ https://github.com/Kacembvs/NovaTV/releases/download/latest-debug/nova-iptv-debu
 Toutes les versions de debug sont signées avec la même clé (`app/debug.keystore`, clé de
 debug publique standard), ce qui permet d'installer une nouvelle version par-dessus l'ancienne.
 
+## Application iPhone / iPad (iOS 17+)
+
+Le dossier `ios/` contient une application native Swift/SwiftUI avec les mêmes
+fonctions : profils M3U/Xtream (mot de passe dans le trousseau iOS), TV en direct
+avec programme en cours/suivant, films, séries et saisons, recherche, Ma liste,
+reprise de lecture, guide TV, téléchargements hors ligne, thèmes NOVA et contrôle
+parental.
+
+- **Lecteur** : lecteur Apple (Picture-in-Picture, AirPlay, pistes audio/sous-titres,
+  vitesse, écran de verrouillage) avec reprise, épisode suivant automatique, zapping
+  et minuteur de sommeil. « Ouvrir avec » VLC, Outplayer ou Infuse, et lecteur par
+  défaut au choix. Les MKV/AVI, non lus par Apple, s'ouvrent dans le lecteur choisi.
+- **Compilation** : le workflow `.github/workflows/ios.yml` (runner macOS) génère le
+  projet avec XcodeGen, lance les tests unitaires puis publie une IPA **non signée** :
+  https://github.com/Kacembvs/NovaTV/releases/download/latest-ios/nova-ios-unsigned.ipa
+- **Installation sans compte développeur payant** : Sideloadly (PC/Mac) ou AltStore
+  signent l'IPA avec votre identifiant Apple gratuit ; l'app doit être re-signée tous
+  les 7 jours (AltStore le fait automatiquement en Wi-Fi). Activez ensuite le mode
+  développeur de l'iPhone (Réglages → Confidentialité et sécurité).
+
 ## Intégration continue
 
 Le workflow `.github/workflows/main.yml` s'exécute à chaque push sur `main`/`master`,

@@ -1,0 +1,7 @@
+NovaTV.xcodeproj/
+build/
+Payload/
+*.ipa
+*.log
+DerivedData/
+.DS_Store
