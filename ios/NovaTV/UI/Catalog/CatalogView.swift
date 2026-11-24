@@ -131,14 +131,20 @@ struct CategoryGrid: View {
         }
     }
 
+    private static func subtitle(_ item: Content) -> String {
+        var parts: [String] = []
+        if let year = item.year { parts.append(year) }
+        if let rating = item.rating, !rating.isEmpty, rating != "0" { parts.append("★ " + rating) }
+        return parts.joined(separator: " · ")
+    }
+
     var body: some View {
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 160), spacing: 12)], spacing: 18) {
                 ForEach(shown) { item in
                     if let route = route(for: item) {
                         NavigationLink(value: route) {
-                            PosterCard(title: item.name, image: item.logo, subtitle: [item.year, item.rating.map { "★ \($0)" }].compactMap { $0 }.joined(separator: " · "),
-                                       width: nil)
+                            PosterCard(title: item.name, image: item.logo, subtitle: Self.subtitle(item), width: nil)
                         }
                         .buttonStyle(.plain)
                     }
