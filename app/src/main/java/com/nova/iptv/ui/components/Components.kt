@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Folder
@@ -23,16 +24,24 @@ import androidx.compose.material.icons.rounded.ThumbDownOffAlt
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.ThumbUpOffAlt
 import androidx.compose.material3.*
+import com.nova.iptv.ui.components.NovaButton as Button
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
+import com.nova.iptv.ui.components.NovaFilterChip as FilterChip
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -40,30 +49,35 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.nova.iptv.R
+import com.nova.iptv.core.isTvLayout
 import com.nova.iptv.data.db.GroupCount
 import com.nova.iptv.ui.theme.NovaColors
+import com.nova.iptv.ui.theme.LocalTvInterface
 
 /** Clickable card with a clearly visible D-pad focus state (cyan border + slight zoom). */
 @Composable
 fun NovaCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(14.dp),
+    shape: Shape = RoundedCornerShape(LocalTvInterface.current.cardRadius.dp),
     color: androidx.compose.ui.graphics.Color = NovaColors.Card,
     focusScale: Float = 1.05f,
     content: @Composable () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    val tv = isTvLayout()
     val scale by animateFloatAsState(if (focused) focusScale else 1f, tween(150), label = "focusScale")
     Surface(
         onClick = onClick,
         modifier = modifier
+            .then(if (tv) Modifier.focusProperties { canFocus = true } else Modifier)
             .zIndex(if (focused) 1f else 0f)
             .graphicsLayer { scaleX = scale; scaleY = scale },
         shape = shape,
         color = color,
-        border = if (focused) BorderStroke(2.dp, NovaColors.Cyan) else BorderStroke(1.dp, NovaColors.Border),
+        border = if (focused) BorderStroke(if (tv) 3.dp else 2.dp, if (tv) NovaColors.TextPrimary else NovaColors.Cyan)
+            else BorderStroke(1.dp, NovaColors.Border),
         interactionSource = interaction,
         content = content,
     )
@@ -109,9 +123,18 @@ fun PosterCard(
     subtitle: String? = null,
     isFavorite: Boolean? = null,
     onToggleFavorite: (() -> Unit)? = null,
+    focusModifier: Modifier = Modifier,
 ) {
+    val tv = isTvLayout()
+    val posterFocus = remember { FocusRequester() }
+    val favoriteFocus = remember { FocusRequester() }
     Column(modifier) {
-        NovaCard(onClick = onClick, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
+        NovaCard(
+            onClick = onClick,
+            modifier = focusModifier.fillMaxWidth()
+                .aspectRatio(if (tv) LocalTvInterface.current.posterAspectRatio else 2f / 3f).focusRequester(posterFocus)
+                .then(if (tv && isFavorite != null && onToggleFavorite != null) Modifier.focusProperties { down = favoriteFocus } else Modifier),
+        ) {
             ContentImage(imageUrl, title, Modifier.fillMaxSize())
         }
         Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(top = 6.dp)) {
@@ -122,7 +145,15 @@ fun PosterCard(
                 }
             }
             if (isFavorite != null && onToggleFavorite != null) {
-                FavoriteButton(isFavorite, onToggleFavorite, size = 32.dp)
+                FavoriteButton(
+                    isFavorite,
+                    onToggleFavorite,
+                    size = if (tv) 48.dp else 32.dp,
+                    modifier = if (tv) Modifier.focusRequester(favoriteFocus).focusProperties {
+                        up = posterFocus
+                        left = posterFocus
+                    } else Modifier,
+                )
             }
         }
     }
@@ -147,8 +178,9 @@ fun RatingButtons(rating: Int?, onRate: (Int) -> Unit) {
 }
 
 @Composable
-fun FavoriteButton(isFavorite: Boolean, onToggle: () -> Unit, size: Dp = 40.dp) {
-    IconButton(onClick = onToggle, modifier = Modifier.size(size)) {
+fun FavoriteButton(isFavorite: Boolean, onToggle: () -> Unit, size: Dp = 40.dp, modifier: Modifier = Modifier) {
+    val targetSize = if (isTvLayout()) size.coerceAtLeast(48.dp) else size
+    IconButton(onClick = onToggle, modifier = modifier.size(targetSize)) {
         Icon(
             if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
             contentDescription = if (isFavorite) "Retirer des favoris" else "Ajouter aux favoris",
@@ -176,11 +208,60 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun SearchField(value: String, onValueChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
+fun SearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    horizontalPadding: Dp = 20.dp,
+) {
+    if (isTvLayout()) {
+        var editing by remember { mutableStateOf(false) }
+        var draft by remember(value) { mutableStateOf(value) }
+        val keyboard = LocalSoftwareKeyboardController.current
+        TvActionButton(
+            label = if (value.isBlank()) placeholder else "Recherche : $value",
+            onClick = { draft = value; editing = true },
+            icon = Icons.Rounded.Search,
+            modifier = modifier.fillMaxWidth().padding(horizontal = horizontalPadding),
+        )
+        if (editing) {
+            val inputFocus = remember { FocusRequester() }
+            AlertDialog(
+                onDismissRequest = { editing = false },
+                title = { Text(placeholder) },
+                text = {
+                    OutlinedTextField(
+                        modifier = Modifier.focusRequester(inputFocus),
+                        value = draft,
+                        onValueChange = { draft = it },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            onValueChange(draft)
+                            keyboard?.hide()
+                            editing = false
+                        }),
+                    )
+                    LaunchedEffect(Unit) {
+                        withFrameNanos { }
+                        inputFocus.requestFocus()
+                    }
+                },
+                confirmButton = {
+                    NovaTextButton(onClick = { onValueChange(draft); editing = false }) { Text("Rechercher") }
+                },
+                dismissButton = {
+                    NovaTextButton(onClick = { onValueChange(""); editing = false }) { Text("Effacer la recherche") }
+                },
+            )
+        }
+        return
+    }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = horizontalPadding),
         placeholder = { Text(placeholder) },
         leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
         trailingIcon = {
@@ -241,7 +322,16 @@ fun GroupChips(
 
 @Composable
 fun NovaLogo(modifier: Modifier = Modifier) {
-    Image(painterResource(R.drawable.nova_logo), contentDescription = "NOVA IPTV", modifier = modifier)
+    BoxWithConstraints(modifier) {
+        if (maxWidth <= 88.dp) {
+            Image(painterResource(R.drawable.nova_mark), contentDescription = "NOVA IPTV", modifier = Modifier.size(56.dp))
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(painterResource(R.drawable.nova_mark), contentDescription = null, modifier = Modifier.size(48.dp))
+                Text("NOVA", fontSize = 24.sp, letterSpacing = 3.sp, fontWeight = FontWeight.Bold, color = NovaColors.TextPrimary)
+            }
+        }
+    }
 }
 
 @Composable

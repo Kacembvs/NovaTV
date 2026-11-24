@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.nova.iptv.player.PlaybackRules
 import com.nova.iptv.ui.theme.NovaThemeId
+import com.nova.iptv.ui.theme.TvInterface
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -26,10 +27,28 @@ data class PlaybackSettings(
     val pictureInPicture: Boolean = true,
 )
 
-data class ThemeSettings(val theme: NovaThemeId = NovaThemeId.NOVA_BLUE, val customAccent: Int? = null)
+data class ThemeSettings(
+    val theme: NovaThemeId = NovaThemeId.NOVA_BLUE,
+    val customAccent: Int? = null,
+    val tvInterface: TvInterface = TvInterface.CLASSIC,
+)
 
 /** Preferred track languages (ISO codes). audio = null: automatic; subtitles = null: off. */
 data class LanguageSettings(val audio: String? = null, val subtitles: String? = null)
+
+enum class DownloadQuality(val label: String, val description: String) {
+    STANDARD("Standard", "Jusqu'à 720p · télécharge plus vite, prend moins de place"),
+    HIGH("Haute", "Meilleure qualité disponible · plus volumineux"),
+}
+
+data class DownloadSettings(
+    /** Like streaming apps, downloads wait for Wi-Fi by default to protect mobile data. */
+    val wifiOnly: Boolean = true,
+    /** Applies to adaptive (HLS) streams; single-file movies are always saved as provided. */
+    val quality: DownloadQuality = DownloadQuality.STANDARD,
+    /** Delete a downloaded episode once watched and download the next one. */
+    val smartDownloads: Boolean = true,
+)
 
 data class ParentalSettings(
     val pinHash: String? = null,
@@ -50,6 +69,7 @@ class SettingsStore(private val context: Context) {
     private val pipKey = booleanPreferencesKey("player_pip")
     private val themeKey = stringPreferencesKey("theme")
     private val customAccentKey = intPreferencesKey("theme_custom_accent")
+    private val tvInterfaceKey = stringPreferencesKey("tv_interface")
 
     private val audioLangKey = stringPreferencesKey("lang_audio")
     private val subtitleLangKey = stringPreferencesKey("lang_subtitles")
@@ -58,6 +78,30 @@ class SettingsStore(private val context: Context) {
     private val lockedGroupsKey = stringSetPreferencesKey("parental_locked_groups")
     private val lockSettingsKey = booleanPreferencesKey("parental_lock_settings")
     private val autoRefreshKey = booleanPreferencesKey("auto_refresh")
+    private val downloadWifiKey = booleanPreferencesKey("download_wifi_only")
+    private val downloadQualityKey = stringPreferencesKey("download_quality")
+    private val smartDownloadsKey = booleanPreferencesKey("download_smart")
+
+    val downloads: Flow<DownloadSettings> = context.dataStore.data.map { prefs ->
+        DownloadSettings(
+            wifiOnly = prefs[downloadWifiKey] ?: true,
+            quality = prefs[downloadQualityKey]?.let { name -> DownloadQuality.entries.firstOrNull { it.name == name } }
+                ?: DownloadQuality.STANDARD,
+            smartDownloads = prefs[smartDownloadsKey] ?: true,
+        )
+    }
+
+    suspend fun setDownloadWifiOnly(enabled: Boolean) {
+        context.dataStore.edit { it[downloadWifiKey] = enabled }
+    }
+
+    suspend fun setDownloadQuality(quality: DownloadQuality) {
+        context.dataStore.edit { it[downloadQualityKey] = quality.name }
+    }
+
+    suspend fun setSmartDownloads(enabled: Boolean) {
+        context.dataStore.edit { it[smartDownloadsKey] = enabled }
+    }
 
     val activeProfileId: Flow<Long?> = context.dataStore.data.map { it[activeProfileKey] }
 
@@ -87,8 +131,11 @@ class SettingsStore(private val context: Context) {
         }
     }
 
-    suspend fun setLockedGroups(groups: Set<String>) {
-        context.dataStore.edit { it[lockedGroupsKey] = groups }
+    suspend fun setGroupLocked(key: String, locked: Boolean) {
+        context.dataStore.edit {
+            val current = it[lockedGroupsKey].orEmpty()
+            it[lockedGroupsKey] = if (locked) current + key else current - key
+        }
     }
 
     suspend fun setLockSettings(enabled: Boolean) {
@@ -116,6 +163,8 @@ class SettingsStore(private val context: Context) {
         ThemeSettings(
             theme = prefs[themeKey]?.let { name -> NovaThemeId.entries.firstOrNull { it.name == name } } ?: NovaThemeId.NOVA_BLUE,
             customAccent = prefs[customAccentKey],
+            tvInterface = prefs[tvInterfaceKey]?.let { name -> TvInterface.entries.firstOrNull { it.name == name } }
+                ?: TvInterface.CLASSIC,
         )
     }
 
@@ -123,6 +172,17 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[themeKey] = theme.name
             if (customAccent != null) prefs[customAccentKey] = customAccent
+        }
+    }
+
+    suspend fun setTvInterface(style: TvInterface) {
+        context.dataStore.edit { it[tvInterfaceKey] = style.name }
+    }
+
+    suspend fun applyTvTheme(style: TvInterface) {
+        context.dataStore.edit {
+            it[tvInterfaceKey] = style.name
+            it[themeKey] = style.defaultPalette.name
         }
     }
 

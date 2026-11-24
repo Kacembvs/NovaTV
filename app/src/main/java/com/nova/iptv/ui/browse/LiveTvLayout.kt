@@ -11,10 +11,19 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.*
+import com.nova.iptv.ui.components.NovaButton as Button
+import com.nova.iptv.ui.components.NovaTextButton as TextButton
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
+import com.nova.iptv.ui.components.NovaFilledTonalButton as FilledTonalButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -27,21 +36,30 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import com.nova.iptv.core.formatClock
-import com.nova.iptv.core.isTelevision
+import com.nova.iptv.core.isTvLayout
 import com.nova.iptv.data.SyncManager
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.player.PreviewPlayer
 import com.nova.iptv.ui.components.*
 import com.nova.iptv.ui.theme.NovaColors
+import com.nova.iptv.ui.theme.LocalTvInterface
+import com.nova.iptv.ui.theme.TvInterface
+import com.nova.iptv.ui.theme.TvLivePresentation
 
 /**
  * TiviMate-style Live TV for TV and large screens: categories | channels | preview + programme.
  * Remote: focusing a channel previews it, OK opens full screen. Touch: first tap previews, second tap opens.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () -> Unit) {
     val context = LocalContext.current
-    val tv = context.isTelevision()
+    val tv = isTvLayout()
+    val style = LocalTvInterface.current
+    if (tv && style.live != TvLivePresentation.PREVIEW) {
+        TvLiveGallery(vm, onOpenGuide, onAddProfile)
+        return
+    }
     val profileLoad by vm.profile.collectAsStateWithLifecycle()
     if (profileLoad.loading) return
     val profile = profileLoad.profile
@@ -69,18 +87,22 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
     groupsFor?.let { CustomGroupsDialog(vm, it) { groupsFor = null } }
     if (managingGroups) CustomGroupsDialog(vm, null) { managingGroups = false }
     val items = vm.items.collectAsLazyPagingItems()
+    val channelsFocus = remember { FocusRequester() }
+    val categoryModifier = if (tv) {
+        Modifier.focusProperties { right = if (items.itemCount > 0) channelsFocus else FocusRequester.Cancel }
+    } else Modifier
 
     Row(Modifier.fillMaxSize().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         // Zone 1: categories
-        Column(Modifier.width(if (tv) 240.dp else 200.dp).fillMaxHeight()) {
+        Column(Modifier.width(if (tv && style == TvInterface.GUIDE) 180.dp else if (tv) 240.dp else 200.dp).fillMaxHeight()) {
             Text("TV en direct", fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, bottom = 4.dp))
             Text(profile.name, color = NovaColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp, bottom = 12.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
-                item(key = "all") { CategoryItem("Toutes les chaînes", null, group == null) { vm.group.value = null } }
-                item(key = "fav") { CategoryItem("Favoris", null, group == BrowseViewModel.FAVORITES, star = true) { vm.group.value = BrowseViewModel.FAVORITES } }
+                item(key = "all") { CategoryItem("Toutes les chaînes", null, group == null, modifier = categoryModifier) { vm.group.value = null } }
+                item(key = "fav") { CategoryItem("Favoris", null, group == BrowseViewModel.FAVORITES, star = true, modifier = categoryModifier) { vm.group.value = BrowseViewModel.FAVORITES } }
                 items(customGroups, key = { "c:" + it.id }) { g ->
                     val key = BrowseViewModel.customKey(g.id)
-                    CategoryItem(g.name, g.count, group == key, folder = true) { vm.group.value = key }
+                    CategoryItem(g.name, g.count, group == key, folder = true, modifier = categoryModifier) { vm.group.value = key }
                 }
                 item(key = "manage") {
                     TextButton(onClick = { managingGroups = true }) {
@@ -89,7 +111,7 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
                     }
                 }
                 items(groups, key = { "g:" + it.name }) { g ->
-                    CategoryItem(g.name, g.count, group == g.name) { vm.group.value = g.name }
+                    CategoryItem(g.name, g.count, group == g.name, modifier = categoryModifier) { vm.group.value = g.name }
                 }
                 item(key = "hidden") {
                     val hiddenCount by vm.hiddenCount.collectAsStateWithLifecycle()
@@ -101,11 +123,17 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
         // Zone 2: channels
         Column(Modifier.weight(1f).fillMaxHeight()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SearchField(query, { vm.query.value = it }, "Rechercher une chaîne", Modifier.weight(1f).padding(end = 0.dp))
-                FilledTonalButton(onClick = onOpenGuide) {
-                    Icon(Icons.Rounded.CalendarViewWeek, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Guide TV")
+                SearchField(query, { vm.query.value = it }, if (tv) "Rechercher" else "Rechercher une chaîne", Modifier.weight(1f), horizontalPadding = if (tv) 0.dp else 20.dp)
+                if (tv) {
+                    IconButton(onClick = onOpenGuide) {
+                        Icon(Icons.Rounded.CalendarViewWeek, contentDescription = "Guide TV")
+                    }
+                } else {
+                    FilledTonalButton(onClick = onOpenGuide) {
+                        Icon(Icons.Rounded.CalendarViewWeek, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Guide TV")
+                    }
                 }
             }
             when (val s = sync) {
@@ -119,7 +147,7 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
             LazyColumn(
                 contentPadding = PaddingValues(vertical = 12.dp, horizontal = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().then(if (tv) Modifier.focusRequester(channelsFocus).focusGroup() else Modifier),
             ) {
                 items(count = items.itemCount, key = items.itemKey { it.id }) { index ->
                     val channel = items[index] ?: return@items
@@ -171,58 +199,22 @@ fun LiveTvLayout(vm: BrowseViewModel, onOpenGuide: () -> Unit, onAddProfile: () 
         }
 
         // Zone 3: preview and programme
-        Column(
-            Modifier.weight(0.9f).fillMaxHeight().padding(end = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            PreviewPlayer(previewUrl, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp)))
-            val channel = preview
-            if (channel == null) {
-                Text(
-                    if (tv) "Parcourez les chaînes avec la télécommande : l'aperçu suit la sélection. OK pour le plein écran."
-                    else "Touchez une chaîne pour l'aperçu, touchez-la à nouveau pour le plein écran.",
-                    color = NovaColors.TextSecondary,
-                    fontSize = 13.sp,
-                )
-            } else {
-                val programmes = channel.tvgId?.let { epg[it] }
-                Text(channel.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val now = programmes?.now
-                if (now != null) {
-                    Text("${formatClock(now.startMs)} – ${formatClock(now.endMs)}", color = NovaColors.Cyan, fontSize = 13.sp)
-                    Text(now.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    val progress = ((System.currentTimeMillis() - now.startMs).toFloat() / (now.endMs - now.startMs)).coerceIn(0f, 1f)
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(3.dp), trackColor = NovaColors.Border)
-                    now.description?.let {
-                        Text(it, color = NovaColors.TextSecondary, fontSize = 13.sp, maxLines = if (tv) 6 else 4, overflow = TextOverflow.Ellipsis)
-                    }
-                } else {
-                    Text("Pas d'information de programme.", color = NovaColors.TextSecondary, fontSize = 13.sp)
-                }
-                programmes?.next?.let { next ->
-                    Text("Ensuite ${formatClock(next.startMs)}  ${next.title}", color = NovaColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = { vm.play(context, channel) }) {
-                        Icon(Icons.Rounded.Fullscreen, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Plein écran")
-                    }
-                    FavoriteButton(channel.streamRef in favorites, { vm.toggleFavorite(channel) })
-                    IconButton(onClick = { groupsFor = channel }) {
-                        Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = "Ajouter à un groupe", tint = NovaColors.TextSecondary)
-                    }
-                }
-            }
-        }
+        LivePreviewPane(
+            preview, previewUrl, preview?.tvgId?.let { epg[it] }, tv,
+            preview?.streamRef in favorites,
+            onPlay = { preview?.let { vm.play(context, it) } },
+            onFavorite = { preview?.let(vm::toggleFavorite) },
+            onGroup = { groupsFor = preview },
+            modifier = Modifier.weight(0.9f).fillMaxHeight().padding(end = 8.dp),
+        )
     }
 }
 
 @Composable
-private fun CategoryItem(name: String, count: Int?, selected: Boolean, star: Boolean = false, folder: Boolean = false, onClick: () -> Unit) {
+private fun CategoryItem(name: String, count: Int?, selected: Boolean, star: Boolean = false, folder: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     NovaCard(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         color = if (selected) NovaColors.Card else Color.Transparent,
         focusScale = 1.02f,
     ) {

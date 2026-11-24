@@ -11,6 +11,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.*
+import com.nova.iptv.ui.components.NovaButton as Button
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
+import com.nova.iptv.ui.components.NovaFilterChip as FilterChip
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +42,16 @@ import com.nova.iptv.ui.components.NovaCard
 import com.nova.iptv.ui.components.RatingButtons
 import com.nova.iptv.ui.novaViewModel
 import com.nova.iptv.ui.theme.NovaColors
+import com.nova.iptv.ui.theme.LocalTvInterface
+import com.nova.iptv.ui.theme.TvInterface
+import com.nova.iptv.core.isTvLayout
+import androidx.compose.material.icons.rounded.Download
+import com.nova.iptv.data.download.DownloadMeta
+import com.nova.iptv.data.download.OfflineStatus
+import com.nova.iptv.ui.LocalAppContainer
+import com.nova.iptv.ui.components.NovaOutlinedButton
+import com.nova.iptv.ui.downloads.DownloadButton
+import com.nova.iptv.ui.downloads.rememberDownloadStarter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -109,19 +122,20 @@ class SeriesViewModel(private val c: AppContainer, private val ref: String) : Vi
     }
 
     fun play(context: Context, loaded: SeriesUiState.Loaded, episodes: List<XtreamClient.Episode>, index: Int) {
-        val cover = loaded.info.cover ?: loaded.content.logo
-        val items = episodes.map { episode ->
-            PlayableItem(
-                ref = episodeRef(episode),
-                title = loaded.content.name,
-                kind = ContentKind.EPISODE,
-                logo = cover,
-                subtitle = episodeLabel(episode),
-                parentKey = ref,
-            )
-        }
-        Playback.start(context, c, loaded.content.profileId, items, index)
+        Playback.start(context, c, loaded.content.profileId, episodes.map { episodeItem(loaded, it) }, index)
     }
+
+    fun episodeItem(loaded: SeriesUiState.Loaded, episode: XtreamClient.Episode) = PlayableItem(
+        ref = episodeRef(episode),
+        title = loaded.content.name,
+        kind = ContentKind.EPISODE,
+        logo = loaded.info.cover ?: loaded.content.logo,
+        subtitle = episodeLabel(episode),
+        parentKey = ref,
+    )
+
+    fun downloadMeta(loaded: SeriesUiState.Loaded, episode: XtreamClient.Episode) =
+        DownloadMeta.from(loaded.content.profileId, episodeItem(loaded, episode), episode.season, episode.number)
 
     companion object {
         fun episodeRef(e: XtreamClient.Episode) = "series/${e.id}.${e.extension}"
@@ -142,6 +156,11 @@ fun SeriesScreen(ref: String, onBack: () -> Unit) {
     val favorite by vm.isFavorite.collectAsStateWithLifecycle()
     val rating by vm.rating.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val tv = isTvLayout()
+    val style = LocalTvInterface.current
+    val offlineItems by LocalAppContainer.current.downloads.items.collectAsStateWithLifecycle()
+    val downloaded = offlineItems.filter { it.status != OfflineStatus.FAILED }.map { it.id }.toSet()
+    val startDownloads = rememberDownloadStarter()
 
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
@@ -163,10 +182,12 @@ fun SeriesScreen(ref: String, onBack: () -> Unit) {
                             ContentImage(
                                 s.info.cover ?: s.content.logo,
                                 s.content.name,
-                                Modifier.width(120.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp)),
+                                Modifier.width(if (tv && style == TvInterface.DISCOVERY) 240.dp else if (tv && style == TvInterface.STUDIOS) 180.dp else 120.dp)
+                                    .aspectRatio(if (tv && style == TvInterface.DISCOVERY) 16f / 9f else 2f / 3f)
+                                    .clip(RoundedCornerShape(if (tv) style.cardRadius.dp else 12.dp)),
                             )
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(s.content.name, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                Text(s.content.name, fontSize = if (tv) 30.sp else 22.sp, fontWeight = FontWeight.Bold)
                                 val meta = listOfNotNull(s.info.releaseDate?.take(4), s.info.genre, "${seasons.size} saison(s)")
                                 Text(meta.joinToString(" · "), color = NovaColors.TextSecondary, fontSize = 13.sp)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -204,19 +225,35 @@ fun SeriesScreen(ref: String, onBack: () -> Unit) {
                     }
                     if (episodes.isEmpty()) {
                         item { Text("Aucun épisode disponible.", color = NovaColors.TextSecondary) }
+                    } else {
+                        item {
+                            val metas = episodes.map { vm.downloadMeta(s, it) }
+                            val saved = downloaded.count { id -> metas.any { it.id == id } }
+                            NovaOutlinedButton(onClick = { startDownloads(s.content.profileId, metas) }, enabled = saved < metas.size) {
+                                Icon(Icons.Rounded.Download, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    if (saved == metas.size) "Saison $selectedSeason téléchargée"
+                                    else "Télécharger la saison $selectedSeason (${metas.size - saved} épisode(s))",
+                                )
+                            }
+                        }
                     }
                     items(episodes, key = { e -> e.id }) { episode ->
                         val history = progress[SeriesViewModel.episodeRef(episode)]
-                        NovaCard(onClick = { vm.play(context, s, s.info.episodes, s.info.episodes.indexOf(episode)) }, modifier = Modifier.fillMaxWidth(), focusScale = 1.02f) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(SeriesViewModel.episodeLabel(episode), fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                if (history != null && history.durationMs > 0) {
-                                    LinearProgressIndicator(
-                                        progress = { history.progress },
-                                        modifier = Modifier.fillMaxWidth().height(3.dp),
-                                    )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            NovaCard(onClick = { vm.play(context, s, s.info.episodes, s.info.episodes.indexOf(episode)) }, modifier = Modifier.weight(1f), focusScale = 1.02f) {
+                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(SeriesViewModel.episodeLabel(episode), fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    if (history != null && history.durationMs > 0) {
+                                        LinearProgressIndicator(
+                                            progress = { history.progress },
+                                            modifier = Modifier.fillMaxWidth().height(3.dp),
+                                        )
+                                    }
                                 }
                             }
+                            DownloadButton(vm.downloadMeta(s, episode), compact = true)
                         }
                     }
                 }

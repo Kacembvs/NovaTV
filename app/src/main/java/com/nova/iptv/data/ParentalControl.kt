@@ -73,9 +73,7 @@ class ParentalControl(private val settings: SettingsStore) {
     }
 
     suspend fun setGroupLocked(profileId: Long, group: String, locked: Boolean) {
-        val current = settings.parental.first().lockedGroups
-        val key = key(profileId, group)
-        settings.setLockedGroups(if (locked) current + key else current - key)
+        settings.setGroupLocked(key(profileId, group), locked)
     }
 
     suspend fun setLockSettings(enabled: Boolean) = settings.setLockSettings(enabled)

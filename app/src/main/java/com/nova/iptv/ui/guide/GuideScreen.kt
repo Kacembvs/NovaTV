@@ -12,6 +12,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.*
+import com.nova.iptv.ui.components.NovaTextButton as TextButton
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,7 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.nova.iptv.AppContainer
 import com.nova.iptv.core.formatClock
-import com.nova.iptv.core.isTelevision
+import com.nova.iptv.core.isTvLayout
 import com.nova.iptv.data.EpgManager
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.data.db.EpgProgrammeEntity
@@ -44,6 +46,8 @@ import com.nova.iptv.ui.components.GroupChips
 import com.nova.iptv.ui.components.NovaCard
 import com.nova.iptv.ui.novaViewModel
 import com.nova.iptv.ui.theme.NovaColors
+import com.nova.iptv.ui.theme.LocalTvInterface
+import com.nova.iptv.ui.theme.TvInterface
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -96,7 +100,8 @@ class GuideViewModel(private val c: AppContainer) : ViewModel() {
 fun GuideScreen(onBack: () -> Unit) {
     val vm = novaViewModel { GuideViewModel(it) }
     val context = LocalContext.current
-    val tv = context.isTelevision()
+    val tv = isTvLayout()
+    val style = LocalTvInterface.current
     val profile by vm.profile.collectAsStateWithLifecycle()
     val groups by vm.groups.collectAsStateWithLifecycle()
     val group by vm.group.collectAsStateWithLifecycle()
@@ -112,8 +117,12 @@ fun GuideScreen(onBack: () -> Unit) {
         }
     }
     val dpPerMinute = if (tv) 6.dp else 4.dp
-    val channelColumn = if (tv) 200.dp else 120.dp
-    val rowHeight = if (tv) 72.dp else 60.dp
+    val channelColumn = if (!tv) 120.dp else if (style == TvInterface.GUIDE) 180.dp else 200.dp
+    val rowHeight = if (!tv) 60.dp else when (style) {
+        TvInterface.GUIDE -> 56.dp
+        TvInterface.ANTENNA -> 88.dp
+        else -> 72.dp
+    }
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     val hasChannels = !channels.isNullOrEmpty()

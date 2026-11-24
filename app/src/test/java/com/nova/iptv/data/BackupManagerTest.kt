@@ -11,6 +11,8 @@ import com.nova.iptv.data.db.ProfileEntity
 import com.nova.iptv.data.db.RatingEntity
 import com.nova.iptv.domain.ContentKind
 import com.nova.iptv.domain.ProfileType
+import com.nova.iptv.ui.theme.TvInterface
+import com.nova.iptv.ui.theme.NovaThemeId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -45,6 +47,47 @@ class BackupManagerTest {
         val groupId = db.customGroupDao().insert(com.nova.iptv.data.db.CustomGroupEntity(profileId = id, name = "Sport"))
         db.customGroupDao().addItem(com.nova.iptv.data.db.CustomGroupItemEntity(groupId, "live/1.ts"))
         return id
+    }
+
+    @Test
+    fun applyingCinemaAppliesItsColoursAndStillAllowsAPersonalPalette() = runBlocking {
+        settings.setTheme(NovaThemeId.PURE_LIGHT)
+        settings.applyTvTheme(TvInterface.CINEMA)
+        val saved = SettingsStore(context).theme.first()
+        assertEquals(TvInterface.CINEMA, saved.tvInterface)
+        assertEquals(NovaThemeId.STREAM_RED, saved.theme)
+        settings.setTheme(NovaThemeId.CUSTOM, 0xFF2ED47A.toInt())
+        assertEquals(TvInterface.CINEMA, settings.theme.first().tvInterface)
+        settings.applyTvTheme(TvInterface.CINEMA)
+        assertEquals(NovaThemeId.STREAM_RED, settings.theme.first().theme)
+    }
+
+    @Test
+    fun tvThemeBackupRestoresTheSavedPaletteRatherThanReapplyingItsDefault() = runBlocking {
+        settings.setTheme(NovaThemeId.STREAM_RED)
+        settings.applyTvTheme(TvInterface.PLUS)
+        assertEquals(NovaThemeId.MONOCHROME, settings.theme.first().theme)
+        assertEquals(TvInterface.PLUS, SettingsStore(context).theme.first().tvInterface)
+        settings.setTheme(NovaThemeId.CINEMA_GOLD)
+        assertEquals(TvInterface.PLUS, settings.theme.first().tvInterface)
+        val source = newDb()
+        val target = newDb()
+        try {
+            val json = BackupManager(source, box, settings).export(null)
+            settings.setTvInterface(TvInterface.GUIDE)
+            assertEquals(NovaThemeId.CINEMA_GOLD, settings.theme.first().theme)
+            BackupManager(target, box, settings).restore(json, null)
+            assertEquals(TvInterface.PLUS, settings.theme.first().tvInterface)
+            assertEquals(NovaThemeId.CINEMA_GOLD, settings.theme.first().theme)
+            val legacy = org.json.JSONObject(json)
+            legacy.getJSONObject("settings").remove("tvInterface")
+            settings.setTvInterface(TvInterface.GUIDE)
+            BackupManager(target, box, settings).restore(legacy.toString(), null)
+            assertEquals(TvInterface.GUIDE, settings.theme.first().tvInterface)
+        } finally {
+            source.close()
+            target.close()
+        }
     }
 
     @Test

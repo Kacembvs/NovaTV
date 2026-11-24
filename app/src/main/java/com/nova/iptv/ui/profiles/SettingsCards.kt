@@ -7,9 +7,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -20,6 +22,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -29,8 +35,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nova.iptv.data.ThemeSettings
+import com.nova.iptv.data.ParentalSettings
+import com.nova.iptv.data.db.GroupCount
 import com.nova.iptv.player.TrackLabels
 import com.nova.iptv.ui.components.PinDialog
+import com.nova.iptv.ui.components.NovaCard
+import com.nova.iptv.ui.components.TvSettingToggle
+import com.nova.iptv.ui.components.NovaButton as Button
+import com.nova.iptv.ui.components.NovaTextButton as TextButton
+import com.nova.iptv.ui.components.NovaOutlinedButton as OutlinedButton
+import com.nova.iptv.ui.components.NovaFilledTonalButton as FilledTonalButton
+import com.nova.iptv.ui.components.NovaFilterChip as FilterChip
+import com.nova.iptv.core.toUserMessage
+import kotlinx.coroutines.CancellationException
+import com.nova.iptv.core.isTvLayout
 import androidx.compose.foundation.lazy.LazyColumn
 import com.nova.iptv.ui.theme.NovaColors
 import com.nova.iptv.ui.theme.NovaPalettes
@@ -39,159 +57,48 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@Composable
-private fun SettingsCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = NovaColors.Card,
-        border = BorderStroke(1.dp, NovaColors.Border),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            content()
-        }
-    }
-}
+internal val LANGUAGES = listOf("fr", "en", "ar", "es", "de", "it", "pt", "tr")
+
+internal class ParentalActions(
+    val create: () -> Unit,
+    val manage: () -> Unit,
+    val unlock: () -> Unit,
+    val change: () -> Unit,
+    val remove: () -> Unit,
+)
 
 @Composable
-fun AppearanceCard(settings: ThemeSettings, onTheme: (NovaThemeId, Int?) -> Unit) {
-    SettingsCard("Apparence") {
-        Text("Le thème s'applique immédiatement.", color = NovaColors.TextSecondary, fontSize = 12.sp)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(NovaThemeId.entries) { id ->
-                val palette = NovaPalettes.of(id, settings.customAccent)
-                val selected = settings.theme == id
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Surface(
-                        onClick = { onTheme(id, null) },
-                        shape = RoundedCornerShape(14.dp),
-                        color = palette.background,
-                        border = BorderStroke(if (selected) 3.dp else 1.dp, if (selected) NovaColors.Cyan else NovaColors.Border),
-                        modifier = Modifier.size(width = 92.dp, height = 64.dp),
-                    ) {
-                        Box(Modifier.padding(10.dp)) {
-                            Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(4.dp)).background(palette.card))
-                            Box(Modifier.align(Alignment.BottomStart).size(18.dp).clip(CircleShape).background(palette.accent))
-                            Box(Modifier.align(Alignment.BottomEnd).size(12.dp).clip(CircleShape).background(palette.accent2))
-                            if (selected) Icon(Icons.Rounded.Check, null, tint = palette.textPrimary, modifier = Modifier.align(Alignment.Center))
-                        }
-                    }
-                    Text(id.label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
-                }
-            }
-        }
-        if (settings.theme == NovaThemeId.CUSTOM) {
-            Text("Couleur d'accent", color = NovaColors.TextSecondary, fontSize = 13.sp)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                val current = settings.customAccent ?: NovaPalettes.CUSTOM_ACCENTS.first()
-                NovaPalettes.CUSTOM_ACCENTS.forEach { argb ->
-                    Box(
-                        Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(Color(argb))
-                            .border(if (argb == current) 3.dp else 0.dp, NovaColors.TextPrimary, CircleShape)
-                            .clickable { onTheme(NovaThemeId.CUSTOM, argb) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-private val LANGUAGES = listOf("fr", "en", "ar", "es", "de", "it", "pt", "tr")
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun LanguagesCard(vm: ProfilesViewModel) {
-    val languages by vm.languages.collectAsStateWithLifecycle()
-    val autoRefresh by vm.autoRefresh.collectAsStateWithLifecycle()
-    SettingsCard("Langues et actualisation") {
-        Text(
-            "Appliquées automatiquement quand le flux propose ces pistes. Un choix fait dans le lecteur devient la nouvelle préférence.",
-            color = NovaColors.TextSecondary,
-            fontSize = 12.sp,
-        )
-        Text("Audio", fontSize = 15.sp)
-        LanguageChips(languages.audio, "Automatique", vm::setAudioLanguage)
-        Text("Sous-titres", fontSize = 15.sp)
-        LanguageChips(languages.subtitles, "Désactivés", vm::setSubtitleLanguage)
-        HorizontalDivider(color = NovaColors.Border)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Actualisation automatique", fontSize = 15.sp)
-                Text(
-                    "Toutes les 12 h, en arrière-plan : playlists et guide TV, même application fermée (réseau requis, batterie non faible).",
-                    color = NovaColors.TextSecondary,
-                    fontSize = 12.sp,
-                )
-            }
-            Switch(checked = autoRefresh, onCheckedChange = vm::setAutoRefresh)
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun LanguageChips(current: String?, noneLabel: String, onSelect: (String?) -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        FilterChip(selected = current == null, onClick = { onSelect(null) }, label = { Text(noneLabel) })
-        val codes = if (current != null && LANGUAGES.none { it == current.take(2) }) LANGUAGES + current else LANGUAGES
-        codes.forEach { code ->
-            FilterChip(
-                selected = current != null && (current == code || current.take(2) == code),
-                onClick = { onSelect(code) },
-                label = { Text(TrackLabels.language(code) ?: code) },
-            )
-        }
-    }
-}
-
-@Composable
-fun ParentalCard(vm: ProfilesViewModel, activeProfileId: Long?) {
+internal fun ParentalSettingsContent(
+    vm: ProfilesViewModel,
+    activeProfileId: Long?,
+    content: @Composable (ParentalSettings, Boolean, ParentalActions) -> Unit,
+) {
+    val tv = isTvLayout()
     val parental by vm.parental.collectAsStateWithLifecycle()
     val unlocked by vm.parentalUnlocked.collectAsStateWithLifecycle()
     var dialog by remember { mutableStateOf<String?>(null) }
     var managing by remember { mutableStateOf(false) }
-
-    SettingsCard("Contrôle parental") {
-        if (!parental.pinSet) {
-            Text(
-                "Définissez un code PIN pour masquer des catégories (chaînes, films, séries) et protéger les réglages.",
-                color = NovaColors.TextSecondary,
-                fontSize = 12.sp,
-            )
-            Button(onClick = { dialog = "create" }) { Text("Définir un code PIN") }
-        } else {
-            val count = activeProfileId?.let { vm.lockedGroups(parental, it).size } ?: 0
-            Text(
-                "$count catégorie(s) verrouillée(s) pour ce profil. " +
-                    if (unlocked) "Contenus protégés visibles jusqu'au reverrouillage." else "Contenus protégés masqués.",
-                color = NovaColors.TextSecondary,
-                fontSize = 12.sp,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Protéger les réglages", fontSize = 15.sp, modifier = Modifier.weight(1f))
-                Switch(checked = parental.lockSettings, onCheckedChange = vm::setLockSettings)
-            }
-            FlowRowCompat {
-                FilledTonalButton(onClick = { if (unlocked) managing = true else dialog = "manage" }, enabled = activeProfileId != null) {
-                    Text("Catégories verrouillées")
-                }
-                if (unlocked) OutlinedButton(onClick = vm::relock) { Text("Reverrouiller") }
-                TextButton(onClick = { dialog = "change" }) { Text("Changer le code") }
-                TextButton(onClick = { dialog = "remove" }) { Text("Supprimer le code", color = NovaColors.Error) }
-            }
-        }
-    }
+    content(parental, unlocked, ParentalActions(
+        create = { dialog = "create" },
+        manage = { if (unlocked) managing = true else dialog = "manage" },
+        unlock = { dialog = "unlock" },
+        change = { dialog = "change" },
+        remove = { dialog = "remove" },
+    ))
 
     when (dialog) {
         "create" -> PinDialog("Nouveau code PIN", "4 à 8 chiffres.", confirm = true, onDismiss = { dialog = null }) { pin ->
-            vm.setPin(pin); dialog = null; null
+            val firstPin = !parental.pinSet
+            vm.setPin(pin)
+            dialog = null
+            if (firstPin && activeProfileId != null) managing = true
+            null
         }
         "manage" -> PinDialog("Contrôle parental", "Saisissez le code PIN.", onDismiss = { dialog = null }) { pin ->
             if (vm.verifyPin(pin)) { dialog = null; managing = true; null } else "Code incorrect."
+        }
+        "unlock" -> PinDialog("Déverrouiller les contenus", "Saisissez le code PIN.", onDismiss = { dialog = null }) { pin ->
+            if (vm.verifyPin(pin)) { dialog = null; null } else "Code incorrect."
         }
         "change" -> PinDialog("Code actuel", null, onDismiss = { dialog = null }) { pin ->
             if (vm.verifyPin(pin)) { dialog = "create"; null } else "Code incorrect."
@@ -202,43 +109,113 @@ fun ParentalCard(vm: ProfilesViewModel, activeProfileId: Long?) {
     }
 
     if (managing && activeProfileId != null) {
-        val groups by produceState<List<com.nova.iptv.data.db.GroupCount>?>(null, activeProfileId) { value = vm.allGroups(activeProfileId) }
-        val locked = vm.lockedGroups(parental, activeProfileId)
-        AlertDialog(
-            onDismissRequest = { managing = false },
-            title = { Text("Catégories verrouillées") },
-            text = {
-                val list = groups
-                when {
-                    list == null -> CircularProgressIndicator()
-                    list.isEmpty() -> Text("Ce profil n'a pas encore de catégories.")
-                    else -> LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                        items(list, key = { it.name }) { g ->
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                Checkbox(
-                                    checked = g.name in locked,
-                                    onCheckedChange = { vm.setGroupLocked(activeProfileId, g.name, it) },
-                                )
-                                Text(g.name, modifier = Modifier.weight(1f), maxLines = 1)
-                                Text("${g.count}", color = NovaColors.TextSecondary, fontSize = 12.sp)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { managing = false }) { Text("Terminé") } },
+        var groupError by remember(activeProfileId) { mutableStateOf<String?>(null) }
+        val groups by produceState<List<GroupCount>?>(null, activeProfileId) {
+            try {
+                value = vm.allGroups(activeProfileId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                groupError = "Échec du chargement des catégories : ${e.toUserMessage()}"
+            }
+        }
+        ParentalGroupDialog(
+            groups = groups,
+            locked = vm.lockedGroups(parental, activeProfileId),
+            tv = tv,
+            onSetLocked = { group, value -> vm.setGroupLocked(activeProfileId, group, value) },
+            onDismiss = { managing = false },
+            error = groupError,
         )
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FlowRowCompat(content: @Composable () -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { content() }
+internal fun ParentalGroupDialog(
+    groups: List<GroupCount>?,
+    locked: Set<String>,
+    tv: Boolean,
+    onSetLocked: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+    error: String? = null,
+) {
+    val firstGroupFocus = remember { FocusRequester() }
+    val groupPaneFocus = remember { FocusRequester() }
+    val doneFocus = remember { FocusRequester() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Catégories verrouillées") },
+        text = {
+            when {
+                error != null -> Text(error, color = NovaColors.Error)
+                groups == null -> CircularProgressIndicator()
+                groups.isEmpty() -> Text("Ce profil n'a pas encore de catégories.")
+                else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (tv) "OK : sélectionner. Droite : terminer. Retour : fermer."
+                        else "Sélectionnez les catégories à masquer.",
+                        color = NovaColors.TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                    LazyColumn(
+                        Modifier.heightIn(max = 300.dp)
+                            .then(if (tv) Modifier.focusRequester(groupPaneFocus).focusGroup() else Modifier),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        itemsIndexed(groups, key = { _, g -> g.name }) { index, g ->
+                            val checked = g.name in locked
+                            if (tv) {
+                                TvSettingToggle(
+                                    title = g.name,
+                                    description = "${g.count} contenus",
+                                    checked = checked,
+                                    onChange = { onSetLocked(g.name, it) },
+                                    modifier = Modifier.fillMaxWidth()
+                                        .then(if (index == 0) Modifier.focusRequester(firstGroupFocus) else Modifier)
+                                        .focusProperties { right = doneFocus },
+                                )
+                            } else {
+                                NovaCard(
+                                    onClick = { onSetLocked(g.name, !checked) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    focusScale = 1f,
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                        Checkbox(checked = checked, onCheckedChange = null)
+                                        Text(g.name, modifier = Modifier.weight(1f), maxLines = 1)
+                                        Text("${g.count}", color = NovaColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(end = 12.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    LaunchedEffect(groups) {
+                        if (tv) {
+                            withFrameNanos { }
+                            firstGroupFocus.requestFocus()
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.focusRequester(doneFocus)
+                    .then(if (tv && !groups.isNullOrEmpty()) Modifier.focusProperties { left = groupPaneFocus } else Modifier),
+            ) { Text("Terminé") }
+        },
+    )
+    LaunchedEffect(groups, error) {
+        if (tv && (groups?.isEmpty() == true || error != null)) doneFocus.requestFocus()
+    }
 }
 
 @Composable
-fun BackupCard(vm: ProfilesViewModel) {
+internal fun BackupSettingsContent(
+    vm: ProfilesViewModel,
+    content: @Composable (String?, () -> Unit, () -> Unit) -> Unit,
+) {
     val context = LocalContext.current
     val message by vm.backupMessage.collectAsStateWithLifecycle()
     val pending by vm.pendingRestore.collectAsStateWithLifecycle()
@@ -254,26 +231,13 @@ fun BackupCard(vm: ProfilesViewModel) {
     }
     val noPicker = "Aucun sélecteur de fichiers disponible sur cet appareil."
 
-    SettingsCard("Sauvegarde et restauration") {
-        Text(
-            "Profils, favoris, j'aime, reprises de lecture et réglages. Les catalogues sont retéléchargés après restauration.",
-            color = NovaColors.TextSecondary,
-            fontSize = 12.sp,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { exportCode = "" }) { Text("Sauvegarder") }
-            OutlinedButton(onClick = {
-                try {
-                    openFile.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
-                } catch (e: ActivityNotFoundException) {
-                    vm.backupMessage.value = noPicker
-                }
-            }) { Text("Restaurer") }
+    content(message, { exportCode = "" }, {
+        try {
+            openFile.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+        } catch (e: ActivityNotFoundException) {
+            vm.backupMessage.value = noPicker
         }
-        message?.let {
-            Text(it, color = if (it.startsWith("Échec")) NovaColors.Error else NovaColors.Cyan, fontSize = 13.sp)
-        }
-    }
+    })
 
     exportCode?.let { code ->
         AlertDialog(

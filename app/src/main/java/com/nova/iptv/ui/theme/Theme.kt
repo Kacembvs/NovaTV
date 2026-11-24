@@ -1,14 +1,23 @@
 package com.nova.iptv.ui.theme
 
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RippleConfiguration
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material.ripple.RippleAlpha
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
+import com.nova.iptv.core.LocalTvLayout
+import com.nova.iptv.core.resolveTvLayout
 
 enum class NovaThemeId(val label: String) {
     NOVA_BLUE("NOVA Blue"),
@@ -16,6 +25,7 @@ enum class NovaThemeId(val label: String) {
     STREAM_RED("Stream Red"),
     PURE_LIGHT("Pure Light"),
     CUSTOM("Personnalisé"),
+    MONOCHROME("NOVA+ Noir et blanc"),
 }
 
 data class NovaPalette(
@@ -77,6 +87,18 @@ object NovaPalettes {
             border = Color(0xFF34343A),
             error = Color(0xFFFF8A65),
         )
+        NovaThemeId.MONOCHROME -> NovaPalette(
+            background = Color(0xFF080808),
+            background2 = Color(0xFF141414),
+            card = Color(0xFF202020),
+            accent = Color.White,
+            accent2 = Color(0xFFD0D0D0),
+            accentStrong = Color.White,
+            textPrimary = Color.White,
+            textSecondary = Color(0xFFB5B5B5),
+            border = Color(0xFF404040),
+            error = Color(0xFFFF6B6B),
+        )
         NovaThemeId.PURE_LIGHT -> NovaPalette(
             background = Color(0xFFF5F7FB),
             background2 = Color(0xFFFFFFFF),
@@ -118,18 +140,20 @@ object NovaColors {
 
 private fun NovaPalette.toScheme(): ColorScheme {
     val onAccent = if (isLight) Color.White else Color(0xFF00131A)
+    val onContainer = if (accentStrong.luminance() > 0.4f) Color(0xFF00131A) else Color.White
+    val onSecondaryAccent = if (accent2.luminance() > 0.4f) Color(0xFF00131A) else Color.White
     return if (isLight) {
         lightColorScheme(
-            primary = accent, onPrimary = onAccent, primaryContainer = accentStrong, onPrimaryContainer = Color.White,
-            secondary = accent2, onSecondary = Color.White, secondaryContainer = card, onSecondaryContainer = textPrimary,
+            primary = accent, onPrimary = onAccent, primaryContainer = accentStrong, onPrimaryContainer = onContainer,
+            secondary = accent2, onSecondary = onSecondaryAccent, secondaryContainer = card, onSecondaryContainer = textPrimary,
             tertiary = accentStrong, background = background, onBackground = textPrimary, surface = background2,
             onSurface = textPrimary, surfaceVariant = card, onSurfaceVariant = textSecondary, outline = border,
             outlineVariant = border, error = error,
         )
     } else {
         darkColorScheme(
-            primary = accent, onPrimary = onAccent, primaryContainer = accentStrong, onPrimaryContainer = Color.White,
-            secondary = accent2, onSecondary = Color.White, secondaryContainer = card, onSecondaryContainer = Color.White,
+            primary = accent, onPrimary = onAccent, primaryContainer = accentStrong, onPrimaryContainer = onContainer,
+            secondary = accent2, onSecondary = onSecondaryAccent, secondaryContainer = card, onSecondaryContainer = Color.White,
             tertiary = accentStrong, background = background, onBackground = textPrimary, surface = background2,
             onSurface = textPrimary, surfaceVariant = card, onSurfaceVariant = textSecondary, outline = border,
             outlineVariant = border, error = error,
@@ -137,7 +161,30 @@ private fun NovaPalette.toScheme(): ColorScheme {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+internal fun tvRippleConfiguration(isLight: Boolean) = RippleConfiguration(
+    color = if (isLight) Color.Black else Color.White,
+    rippleAlpha = RippleAlpha(
+        draggedAlpha = 0.16f,
+        focusedAlpha = 0f,
+        hoveredAlpha = 0.08f,
+        pressedAlpha = 0.12f,
+    ),
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NovaTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = NovaColors.palette.toScheme(), content = content)
+    val tvLayout = resolveTvLayout()
+    if (tvLayout) {
+        CompositionLocalProvider(
+            LocalTvLayout provides true,
+            LocalRippleConfiguration provides tvRippleConfiguration(NovaColors.palette.isLight),
+            LocalTvInterface provides NovaTvInterface.current,
+        ) {
+            MaterialTheme(colorScheme = NovaColors.palette.toScheme(), content = content)
+        }
+    } else {
+        MaterialTheme(colorScheme = NovaColors.palette.toScheme(), content = content)
+    }
 }

@@ -7,15 +7,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.*
+import com.nova.iptv.ui.components.NovaTextButton as TextButton
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.data.db.CustomGroupCount
+import com.nova.iptv.core.isTvLayout
+import com.nova.iptv.ui.components.TvActionButton
+import com.nova.iptv.ui.components.TvSettingToggle
 import com.nova.iptv.ui.theme.NovaColors
 
 /**
@@ -24,6 +30,7 @@ import com.nova.iptv.ui.theme.NovaColors
  */
 @Composable
 fun CustomGroupsDialog(vm: BrowseViewModel, channel: ContentEntity?, onDismiss: () -> Unit) {
+    val tv = isTvLayout()
     val groups by vm.customGroups.collectAsStateWithLifecycle()
     val memberOf by remember(channel) { channel?.let { vm.groupIdsFor(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList()) }
         .collectAsStateWithLifecycle(emptyList())
@@ -41,6 +48,20 @@ fun CustomGroupsDialog(vm: BrowseViewModel, channel: ContentEntity?, onDismiss: 
                 }
                 LazyColumn(Modifier.heightIn(max = 320.dp)) {
                     items(groups, key = { it.id }) { group ->
+                        if (tv) {
+                            Column(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (channel != null) {
+                                    TvSettingToggle(group.name, "${group.count} chaînes", group.id in memberOf, { vm.setInGroup(group.id, channel, it) })
+                                } else {
+                                    Text("${group.name} · ${group.count} chaînes")
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TvActionButton("Renommer", { renaming = group }, Modifier.weight(1f), icon = Icons.Rounded.Edit)
+                                    TvActionButton("Supprimer", { deleting = group }, Modifier.weight(1f), destructive = true, icon = Icons.Rounded.Delete)
+                                }
+                            }
+                            return@items
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                             if (channel != null) {
                                 Checkbox(checked = group.id in memberOf, onCheckedChange = { vm.setInGroup(group.id, channel, it) })

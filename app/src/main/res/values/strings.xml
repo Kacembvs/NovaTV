@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NOVA IPTV</string>
+    <string name="download_channel_name">Téléchargements</string>
+    <string name="download_channel_description">Progression des films et épisodes téléchargés pour une lecture hors ligne</string>
 </resources>

@@ -8,11 +8,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.*
+import com.nova.iptv.ui.components.NovaButton as Button
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -29,7 +32,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.nova.iptv.AppContainer
-import com.nova.iptv.core.isTelevision
+import com.nova.iptv.core.isTvLayout
 import com.nova.iptv.data.SyncManager
 import com.nova.iptv.data.db.*
 import com.nova.iptv.domain.ContentKind
@@ -39,6 +42,8 @@ import com.nova.iptv.ui.Playback
 import com.nova.iptv.ui.components.*
 import com.nova.iptv.ui.novaViewModel
 import com.nova.iptv.ui.theme.NovaColors
+import com.nova.iptv.ui.theme.LocalTvInterface
+import com.nova.iptv.ui.theme.TvInterface
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 
@@ -141,11 +146,13 @@ fun HomeScreen(
     onAddProfile: () -> Unit,
     onOpenSeries: (String) -> Unit,
     onOpenMovie: (String) -> Unit,
+    onOpenCollection: (ContentKind, String) -> Unit,
 ) {
     val vm = novaViewModel { HomeViewModel(it) }
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val tv = context.isTelevision()
+    val tv = isTvLayout()
+    val online = rememberIsOnline()
 
     if (state.loading) return
     val profile = state.profile
@@ -163,6 +170,24 @@ fun HomeScreen(
     }
     val posterWidth = if (tv) 150.dp else 110.dp
 
+    if (tv && LocalTvInterface.current != TvInterface.CLASSIC) {
+        TvHomeScreen(
+            state = state,
+            onNavigate = onNavigate,
+            onOpen = open,
+            onHistory = { list, index -> vm.playHistory(context, list, index) },
+            onWatch = { content ->
+                if (content.streamRef.isXtreamSeries()) onOpenSeries(content.streamRef)
+                else vm.playSingle(context, profile.id, content.toPlayable())
+            },
+            onDetails = { content ->
+                if (content.kind == ContentKind.MOVIE) onOpenMovie(content.streamRef) else onOpenSeries(content.streamRef)
+            },
+            onCollection = onOpenCollection,
+        )
+        return
+    }
+
     LazyColumn(
         contentPadding = PaddingValues(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp),
@@ -176,6 +201,7 @@ fun HomeScreen(
                 NovaLogo(Modifier.height(if (tv) 64.dp else 48.dp))
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { onNavigate("search") }) { Icon(Icons.Rounded.Search, contentDescription = "Recherche") }
+                IconButton(onClick = { onNavigate("downloads") }) { Icon(Icons.Rounded.DownloadForOffline, contentDescription = "Téléchargements") }
                 AssistChip(
                     onClick = { onNavigate("profiles") },
                     label = { Text(profile.name, maxLines = 1) },
@@ -183,6 +209,7 @@ fun HomeScreen(
                 )
             }
         }
+        if (!online) item { OfflineBanner { onNavigate("downloads") } }
         when (val s = state.sync) {
             is SyncManager.State.Running -> item { SyncBanner("Chargement de « ${profile.name} »… ${s.loaded} contenus", isError = false) }
             is SyncManager.State.Failed -> item { SyncBanner("Échec du chargement : ${s.message}", isError = true) }
@@ -327,7 +354,7 @@ private fun Welcome(onAddProfile: () -> Unit) {
 }
 
 @Composable
-private fun HomeRow(title: String, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
+internal fun HomeRow(title: String, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SectionTitle(title)
         LazyRow(
@@ -352,7 +379,7 @@ private fun QuickTile(title: String, subtitle: String, icon: ImageVector, modifi
 }
 
 @Composable
-private fun ResumeCard(entry: HistoryEntity, modifier: Modifier, onClick: () -> Unit) {
+internal fun ResumeCard(entry: HistoryEntity, modifier: Modifier, onClick: () -> Unit) {
     Column(modifier) {
         NovaCard(onClick = onClick, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
             Box {
@@ -369,7 +396,7 @@ private fun ResumeCard(entry: HistoryEntity, modifier: Modifier, onClick: () -> 
 }
 
 @Composable
-private fun ChannelTile(title: String, logo: String?, modifier: Modifier, onClick: () -> Unit) {
+internal fun ChannelTile(title: String, logo: String?, modifier: Modifier, onClick: () -> Unit) {
     Column(modifier) {
         NovaCard(onClick = onClick, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 10f)) {
             ContentImage(

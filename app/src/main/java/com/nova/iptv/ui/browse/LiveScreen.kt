@@ -7,9 +7,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarViewWeek
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
-import androidx.compose.material3.IconButton
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
+import com.nova.iptv.ui.components.NovaFilledTonalButton as FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -20,7 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import com.nova.iptv.core.isTelevision
+import com.nova.iptv.core.isTvLayout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,7 +43,7 @@ import com.nova.iptv.ui.theme.NovaColors
 fun LiveScreen(onAddProfile: () -> Unit, onOpenGuide: () -> Unit) {
     val vm = novaViewModel(key = "live") { BrowseViewModel(it, ContentKind.LIVE) }
     val context = LocalContext.current
-    if (context.isTelevision() || LocalConfiguration.current.screenWidthDp >= 840) {
+    if (isTvLayout() || LocalConfiguration.current.screenWidthDp >= 840) {
         LiveTvLayout(vm, onOpenGuide, onAddProfile)
         return
     }

@@ -12,6 +12,9 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material3.*
+import com.nova.iptv.ui.components.NovaButton as Button
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
+import com.nova.iptv.ui.components.NovaOutlinedButton as OutlinedButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,17 +34,22 @@ import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
 import com.nova.iptv.AppContainer
 import com.nova.iptv.core.formatDuration
-import com.nova.iptv.core.isTelevision
+import com.nova.iptv.core.isTvLayout
 import com.nova.iptv.core.toUserMessage
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.data.db.HistoryEntity
 import com.nova.iptv.data.db.toPlayable
 import com.nova.iptv.data.source.XtreamClient
 import com.nova.iptv.domain.ProfileType
+import com.nova.iptv.domain.ContentKind
+import com.nova.iptv.data.download.DownloadMeta
+import com.nova.iptv.ui.downloads.DownloadButton
 import com.nova.iptv.ui.Playback
 import com.nova.iptv.ui.components.*
 import com.nova.iptv.ui.novaViewModel
 import com.nova.iptv.ui.theme.NovaColors
+import com.nova.iptv.ui.theme.LocalTvInterface
+import com.nova.iptv.ui.theme.TvInterface
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -126,7 +134,8 @@ fun MovieScreen(ref: String, onBack: () -> Unit, onOpenMovie: (String) -> Unit) 
     val favorite by vm.favorite.collectAsStateWithLifecycle()
     val rating by vm.rating.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val tv = context.isTelevision()
+    val tv = isTvLayout()
+    val style = LocalTvInterface.current
 
     when (val s = state) {
         MovieUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -143,11 +152,15 @@ fun MovieScreen(ref: String, onBack: () -> Unit, onOpenMovie: (String) -> Unit) 
                 (saved.durationMs <= 0 || saved.positionMs < saved.durationMs * 0.95)
             val primaryFocus = remember { FocusRequester() }
             LaunchedEffect(content.id) { runCatching { primaryFocus.requestFocus() } }
-            val headerHeight = if (tv) 380.dp else 260.dp
+            val headerHeight = if (!tv) 260.dp else when (style) {
+                TvInterface.GUIDE -> 0.dp
+                TvInterface.ANTENNA -> 240.dp
+                else -> style.heroHeight.dp
+            }
 
             Box(Modifier.fillMaxSize()) {
                 val backdrop = info?.backdrop ?: cover
-                if (backdrop != null) {
+                if (backdrop != null && headerHeight > 0.dp) {
                     AsyncImage(
                         model = backdrop,
                         contentDescription = null,
@@ -173,15 +186,24 @@ fun MovieScreen(ref: String, onBack: () -> Unit, onOpenMovie: (String) -> Unit) 
                     item {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(18.dp),
-                            modifier = Modifier.padding(horizontal = 20.dp).padding(top = if (tv) 120.dp else 70.dp),
+                            modifier = Modifier.padding(horizontal = 20.dp).padding(top = when {
+                                !tv -> 70.dp
+                                style == TvInterface.GUIDE -> 0.dp
+                                style == TvInterface.ANTENNA -> 24.dp
+                                else -> 80.dp
+                            }),
                         ) {
-                            ContentImage(
-                                cover,
-                                content.name,
-                                Modifier.width(if (tv) 180.dp else 120.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp)),
-                            )
+                            if (!tv || style != TvInterface.CINEMA) {
+                                ContentImage(
+                                    cover,
+                                    content.name,
+                                    Modifier.width(if (!tv) 120.dp else if (style == TvInterface.DISCOVERY) 240.dp else if (style == TvInterface.GUIDE) 100.dp else 180.dp)
+                                        .aspectRatio(if (tv && style == TvInterface.DISCOVERY) 16f / 9f else 2f / 3f)
+                                        .clip(RoundedCornerShape(if (tv) style.cardRadius.dp else 12.dp)),
+                                )
+                            }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(content.name, fontSize = if (tv) 30.sp else 22.sp, fontWeight = FontWeight.Bold)
+                                Text(content.name, fontSize = if (tv && style == TvInterface.CINEMA) 40.sp else if (tv) 30.sp else 22.sp, fontWeight = FontWeight.Bold)
                                 val meta = listOfNotNull(
                                     (info?.releaseDate ?: content.year)?.take(4),
                                     info?.duration?.let(::formatRuntime),
@@ -216,6 +238,12 @@ fun MovieScreen(ref: String, onBack: () -> Unit, onOpenMovie: (String) -> Unit) 
                                 FavoriteButton(favorite, { vm.toggleFavorite(content) })
                                 RatingButtons(rating) { vm.rate(content, it) }
                             }
+                            if (content.kind != ContentKind.LIVE) {
+                                DownloadButton(
+                                    DownloadMeta.from(content.profileId, content.toPlayable().copy(logo = cover)),
+                                    if (tv) Modifier else Modifier.fillMaxWidth(),
+                                )
+                            }
                             if (resumable) {
                                 LinearProgressIndicator(progress = { saved!!.progress }, modifier = Modifier.fillMaxWidth().height(3.dp))
                             }
@@ -242,7 +270,7 @@ fun MovieScreen(ref: String, onBack: () -> Unit, onOpenMovie: (String) -> Unit) 
                                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 ) {
                                     items(s.similar, key = { it.id }) { item ->
-                                        PosterCard(item.name, item.logo, { onOpenMovie(item.streamRef) }, Modifier.width(if (tv) 150.dp else 110.dp))
+                                        PosterCard(item.name, item.logo, { onOpenMovie(item.streamRef) }, Modifier.width(if (tv) style.cardWidth.dp else 110.dp))
                                     }
                                 }
                             }

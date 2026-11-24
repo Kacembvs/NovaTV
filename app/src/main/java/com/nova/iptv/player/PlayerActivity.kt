@@ -53,7 +53,8 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.ui.DefaultTimeBar
+import androidx.media3.exoplayer.offline.DownloadRequest
+import com.nova.iptv.data.download.DownloadMeta
 import androidx.media3.ui.PlayerView
 import com.nova.iptv.NovaApp
 import com.nova.iptv.core.formatClock
@@ -63,6 +64,7 @@ import com.nova.iptv.data.db.HistoryEntity
 import com.nova.iptv.domain.ContentKind
 import com.nova.iptv.domain.PlayableItem
 import com.nova.iptv.ui.theme.NovaTheme
+import com.nova.iptv.ui.theme.NovaTvInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -79,6 +81,8 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
     private val container by lazy { (application as NovaApp).container }
     private lateinit var session: PlaybackQueue.Session
     private var urls: List<String> = emptyList()
+    /** Downloaded items, played from local storage (works without network). */
+    private var offline: Map<String, DownloadRequest> = emptyMap()
     private var exo: ExoPlayer? = null
     private var player: Player? = null
     private var playerView: PlayerView? = null
@@ -101,6 +105,7 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
     private var cancelledNextFor = -1
     private var endHandledFor = -1
     private var topBarFocused = false
+    private val tvControls = TvPlaybackControls()
     private var pipEnabled = true
     private var pipReceiver: BroadcastReceiver? = null
 
@@ -159,6 +164,11 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
                 return@launch
             }
             urls = withContext(Dispatchers.Default) { container.profiles.streamUrls(profile, session.items.map { it.ref }) }
+            offline = withContext(Dispatchers.IO) {
+                runCatching {
+                    container.downloads.completedRequests(session.profileId, session.items.filter { it.kind != ContentKind.LIVE }.map { it.ref })
+                }.getOrDefault(emptyMap())
+            }
             startPlayback()
             registerPipReceiver()
             // Cast is only offered on phones/tablets; created once playback is ready to hand over.
@@ -168,7 +178,7 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
     }
 
     private suspend fun startPlayback() {
-        val dataSource = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(container.http))
+        val dataSource = container.downloads.playbackDataSourceFactory(this)
         val exoPlayer = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
             .setAudioAttributes(
@@ -244,11 +254,15 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
 
     private fun mediaItem(index: Int, mimeType: String? = null): MediaItem {
         val item = session.items[index]
+        val metadata = MediaMetadata.Builder().setTitle(item.title).setSubtitle(item.subtitle).build()
+        offline[item.ref]?.let { request ->
+            return request.toMediaItem().buildUpon().setMediaId(item.ref).setMediaMetadata(metadata).build()
+        }
         return MediaItem.Builder()
             .setUri(urls[index])
             .setMediaId(item.ref)
             .apply { if (mimeType != null) setMimeType(mimeType) }
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(item.title).setSubtitle(item.subtitle).build())
+            .setMediaMetadata(metadata)
             .build()
     }
 
@@ -599,6 +613,7 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
 
     override fun onTopBarFocused(focused: Boolean) {
         topBarFocused = focused
+        if (ui.value.isTv) playerView?.controllerShowTimeoutMs = if (focused) 0 else TV_CONTROLLER_TIMEOUT_MS
     }
 
     // region Google Cast
@@ -709,6 +724,7 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
         endHandledFor = index
         val item = currentItem() ?: return
         markFinished(item, p)
+        smartDownload(index)
         val action = PlaybackRules.onItemEnded(
             sleepAtEndOfItem = ui.value.sleep == SleepMode.EndOfItem,
             hasNext = p.hasNextMediaItem(),
@@ -723,6 +739,20 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
                 val next = session.items.getOrNull(index + 1)?.takeIf { p.hasNextMediaItem() }
                 ui.update { it.copy(nextUp = null, endScreen = EndScreen(next?.let { n -> n.subtitle ?: n.title })) }
             }
+        }
+    }
+
+    /** Netflix-style smart downloads: a watched downloaded episode makes room for the next one. */
+    private fun smartDownload(index: Int) {
+        val item = session.items.getOrNull(index) ?: return
+        if (item.kind != ContentKind.EPISODE || !offline.containsKey(item.ref)) return
+        container.appScope.launch {
+            if (!container.settings.downloads.first().smartDownloads) return@launch
+            val downloads = container.downloads
+            withContext(Dispatchers.Main) { downloads.remove(DownloadMeta.downloadId(session.profileId, item.ref)) }
+            val next = session.items.getOrNull(index + 1)
+                ?.takeIf { it.kind == ContentKind.EPISODE && it.parentKey == item.parentKey } ?: return@launch
+            runCatching { downloads.download(session.profileId, next) }
         }
     }
 
@@ -830,7 +860,15 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
         view.setShowNextButton(true)
         view.setShowPreviousButton(true)
         view.setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
-        view.controllerShowTimeoutMs = 3_500
+        if (ui.value.isTv) {
+            view.setControllerAnimationEnabled(false)
+            tvControls.installFocusIndicators(view, NovaTvInterface.current.cardRadius)
+            view.findViewById<View>(androidx.media3.ui.R.id.exo_settings)?.apply {
+                contentDescription = "Options de lecture"
+                setOnClickListener { openPanel(PlayerPanel.OPTIONS) }
+            }
+        }
+        view.controllerShowTimeoutMs = if (ui.value.isTv) TV_CONTROLLER_TIMEOUT_MS else 3_500
         view.useController = !ui.value.locked
         view.setControllerVisibilityListener(
             PlayerView.ControllerVisibilityListener { visibility ->
@@ -961,25 +999,34 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val state = ui.value
+        val overlayOpen = state.error != null || state.nextUp != null || state.endScreen != null ||
+            state.sleepStopped || state.panel != null || state.castDevice != null || state.inPip
+        if (state.isTv && !overlayOpen && !state.locked) {
+            val view = playerView
+            if (view != null && view.useController && tvControls.dispatch(event, view, topBarFocused)) return true
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
-            val state = ui.value
             if (event.keyCode == KeyEvent.KEYCODE_MENU) {
                 openPanel(PlayerPanel.OPTIONS)
                 return true
             }
-            val overlayOpen = state.error != null || state.nextUp != null || state.endScreen != null ||
-                state.sleepStopped || state.panel != null
             if (!overlayOpen && !state.locked) {
                 val controllerVisible = playerView?.isControllerFullyVisible == true
-                // Remote: from the seek bar (top of the default controls), UP reaches NOVA's top bar.
-                if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && controllerVisible && currentFocus is DefaultTimeBar) {
+                if (state.isTv && controllerVisible && !topBarFocused && playerView?.hasFocus() == true &&
+                    event.keyCode == KeyEvent.KEYCODE_DPAD_UP
+                ) {
                     ui.update { it.copy(topBarFocusRequest = it.topBarFocusRequest + 1) }
                     return true
                 }
                 if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN && topBarFocused) {
-                    playerView?.showController()
-                    playerView?.requestFocus()
+                    playerView?.let { tvControls.showAndFocus(it) }
                     return true
+                }
+                if (state.isTv && controllerVisible && !topBarFocused &&
+                    event.keyCode in KeyEvent.KEYCODE_DPAD_UP..KeyEvent.KEYCODE_DPAD_RIGHT
+                ) {
+                    playerView?.showController()
                 }
                 if (isLiveQueue && !topBarFocused) {
                     when (event.keyCode) {
@@ -1029,6 +1076,7 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
     private companion object {
         var active: java.lang.ref.WeakReference<PlayerActivity>? = null
         const val PROGRESS_SAVE_INTERVAL_MS = 30_000L
+        const val TV_CONTROLLER_TIMEOUT_MS = 7_000
         const val MAX_LIVE_RETRIES = 3
         const val ACTION_PIP_TOGGLE = "com.nova.iptv.PIP_TOGGLE"
         val HIDDEN_COMMANDS = intArrayOf(Player.COMMAND_SET_SPEED_AND_PITCH, Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS)

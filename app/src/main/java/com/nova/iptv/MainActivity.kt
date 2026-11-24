@@ -1,6 +1,9 @@
 package com.nova.iptv
 
+import android.content.Intent
 import android.graphics.Color
+import androidx.compose.runtime.mutableStateOf
+import com.nova.iptv.data.download.OfflineDownloads
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -19,8 +22,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    /** Screen requested from outside, e.g. the downloads notification. */
+    private val openRequest = mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openRequest.value = intent.getStringExtra(OfflineDownloads.EXTRA_OPEN)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) openRequest.value = intent?.getStringExtra(OfflineDownloads.EXTRA_OPEN)
         applySystemBars(NovaColors.palette.isLight)
         val container = (application as NovaApp).container
         container.appScope.launch {
@@ -32,7 +44,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(light) { applySystemBars(light) }
                 CompositionLocalProvider(LocalAppContainer provides container) {
                     Surface(Modifier.fillMaxSize(), color = NovaColors.Background) {
-                        NovaAppUi()
+                        NovaAppUi(openRequest.value) { openRequest.value = null }
                     }
                 }
             }

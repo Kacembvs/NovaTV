@@ -11,6 +11,8 @@ import com.nova.iptv.data.db.ProfileEntity
 import com.nova.iptv.domain.ContentKind
 import com.nova.iptv.domain.ProfileType
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,6 +52,18 @@ class ParentalControlTest {
         assertFalse(parental.verify("0000"))
         assertTrue(parental.verify("2468"))
         assertEquals(emptySet<String>(), parental.hiddenGroups(1).first())
+        parental.removePin()
+    }
+
+    @Test
+    fun concurrentCategorySelectionsAreAllSaved() = runBlocking {
+        val parental = ParentalControl(SettingsStore(context))
+        parental.removePin()
+        parental.setPin("2468")
+        val names = (1..20).map { "Catégorie $it" }
+        names.map { name -> async { parental.setGroupLocked(1, name, true) } }.awaitAll()
+        parental.relock()
+        assertEquals(names.toSet(), parental.hiddenGroups(1).first())
         parental.removePin()
     }
 

@@ -11,6 +11,7 @@ import com.nova.iptv.data.PlaybackQueue
 import com.nova.iptv.data.ProfileRepository
 import com.nova.iptv.data.SettingsStore
 import com.nova.iptv.data.SyncManager
+import com.nova.iptv.data.download.OfflineDownloads
 import com.nova.iptv.data.db.NovaDatabase
 import com.nova.iptv.data.source.XtreamClient
 import kotlinx.coroutines.CoroutineScope
@@ -36,4 +37,5 @@ class AppContainer(context: Context) {
     val library = LibraryRepository(db)
     val parental = ParentalControl(settings)
     val backup = BackupManager(db, cipher, settings)
+    val downloads by lazy { OfflineDownloads(appContext, http, settings, profiles, appScope) }
 }

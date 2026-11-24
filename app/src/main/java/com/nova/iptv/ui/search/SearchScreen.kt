@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.*
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,7 +26,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.nova.iptv.AppContainer
-import com.nova.iptv.core.isTelevision
+import com.nova.iptv.core.isTvLayout
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.data.db.toPlayable
 import com.nova.iptv.domain.ContentKind
@@ -34,6 +35,7 @@ import com.nova.iptv.ui.Playback
 import com.nova.iptv.ui.components.*
 import com.nova.iptv.ui.novaViewModel
 import com.nova.iptv.ui.theme.NovaColors
+import com.nova.iptv.ui.theme.LocalTvInterface
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
@@ -82,7 +84,7 @@ fun SearchScreen(onBack: () -> Unit, onOpenMovie: (String) -> Unit, onOpenSeries
     val query by vm.query.collectAsStateWithLifecycle()
     val results by vm.results.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val tv = context.isTelevision()
+    val tv = isTvLayout()
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (!tv) runCatching { focus.requestFocus() } }
 
@@ -139,7 +141,7 @@ fun SearchScreen(onBack: () -> Unit, onOpenMovie: (String) -> Unit, onOpenSeries
                                             title = item.name,
                                             imageUrl = item.logo,
                                             subtitle = item.year ?: item.groupTitle,
-                                            modifier = Modifier.width(if (tv) 150.dp else 110.dp),
+                                            modifier = Modifier.width(if (tv) LocalTvInterface.current.cardWidth.dp else 110.dp),
                                             onClick = {
                                                 when {
                                                     item.kind == ContentKind.MOVIE -> onOpenMovie(item.streamRef)

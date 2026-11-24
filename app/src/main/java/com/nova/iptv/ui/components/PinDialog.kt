@@ -2,14 +2,19 @@ package com.nova.iptv.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.*
+import com.nova.iptv.ui.components.NovaTextButton as TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -35,7 +40,10 @@ fun PinDialog(
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val confirmFocus = remember { FocusRequester() }
+    val submitFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val canSubmit = PinHasher.isValidPin(pin) && (!confirm || PinHasher.isValidPin(again))
 
     fun submit() {
         error = when {
@@ -62,8 +70,19 @@ fun PinDialog(
                     label = { Text("Code PIN") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.focusRequester(focus),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.NumberPassword,
+                        imeAction = if (confirm) ImeAction.Next else ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onNext = { confirmFocus.requestFocus() },
+                        onDone = {
+                            keyboard?.hide()
+                            if (canSubmit) submitFocus.requestFocus()
+                        },
+                    ),
+                    modifier = Modifier.focusRequester(focus)
+                        .focusProperties { if (!confirm && canSubmit) down = submitFocus },
                 )
                 if (confirm) {
                     OutlinedTextField(
@@ -72,13 +91,23 @@ fun PinDialog(
                         label = { Text("Confirmer le code") },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = {
+                            keyboard?.hide()
+                            if (canSubmit) submitFocus.requestFocus()
+                        }),
+                        modifier = Modifier.focusRequester(confirmFocus)
+                            .focusProperties { if (canSubmit) down = submitFocus },
                     )
                 }
                 error?.let { Text(it, color = NovaColors.Error, fontSize = 13.sp) }
+                LaunchedEffect(Unit) {
+                    withFrameNanos { }
+                    focus.requestFocus()
+                }
             }
         },
-        confirmButton = { TextButton(onClick = ::submit, enabled = pin.length >= 4) { Text("Valider") } },
+        confirmButton = { TextButton(onClick = ::submit, enabled = canSubmit, modifier = Modifier.focusRequester(submitFocus)) { Text("Valider") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
     )
 }

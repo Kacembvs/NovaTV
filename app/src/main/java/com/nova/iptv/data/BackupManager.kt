@@ -13,6 +13,7 @@ import com.nova.iptv.data.db.RatingEntity
 import com.nova.iptv.domain.ContentKind
 import com.nova.iptv.domain.ProfileType
 import com.nova.iptv.ui.theme.NovaThemeId
+import com.nova.iptv.ui.theme.TvInterface
 import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import org.json.JSONObject
@@ -71,6 +72,7 @@ class BackupManager(
                 .put("freeRotation", playback.freeRotation)
                 .put("pictureInPicture", playback.pictureInPicture)
                 .put("theme", theme.theme.name)
+                .put("tvInterface", theme.tvInterface.name)
                 .putOpt("customAccent", theme.customAccent),
         )
         if (key != null) {
@@ -254,6 +256,9 @@ class BackupManager(
             )
             val theme = NovaThemeId.entries.firstOrNull { it.name == s.optString("theme") }
             if (theme != null) settings.setTheme(theme, if (s.has("customAccent")) s.getInt("customAccent") else null)
+            TvInterface.entries.firstOrNull { it.name == s.optString("tvInterface") }?.let {
+                settings.setTvInterface(it)
+            }
         }
         return RestoreResult(added, merged, favorites, history, ratings, newIds, missingPasswords, customGroups)
     }

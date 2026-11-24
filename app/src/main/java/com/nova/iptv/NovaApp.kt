@@ -7,6 +7,7 @@ import com.nova.iptv.data.RefreshWorker
 import com.nova.iptv.data.ThemeSettings
 import com.nova.iptv.ui.theme.NovaColors
 import com.nova.iptv.ui.theme.NovaPalettes
+import com.nova.iptv.ui.theme.NovaTvInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -28,10 +29,12 @@ class NovaApp : Application(), ImageLoaderFactory {
         container.appScope.launch {
             container.settings.autoRefresh.distinctUntilChanged().collect { RefreshWorker.schedule(this@NovaApp, it) }
         }
+        container.downloads.start()
     }
 
     private fun applyTheme(settings: ThemeSettings) {
         NovaColors.palette = NovaPalettes.of(settings.theme, settings.customAccent)
+        NovaTvInterface.current = settings.tvInterface
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

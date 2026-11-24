@@ -5,24 +5,35 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.nova.iptv.AppContainer
+import com.nova.iptv.core.isTvLayout
 import android.content.Context
 import android.net.Uri
 import com.nova.iptv.core.toUserMessage
@@ -32,6 +43,7 @@ import com.nova.iptv.data.ParentalSettings
 import com.nova.iptv.ui.components.PinDialog
 import com.nova.iptv.data.ThemeSettings
 import com.nova.iptv.ui.theme.NovaThemeId
+import com.nova.iptv.ui.theme.TvInterface
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,6 +57,11 @@ import com.nova.iptv.domain.ProfileType
 import com.nova.iptv.player.PlaybackRules
 import com.nova.iptv.ui.components.EmptyState
 import com.nova.iptv.ui.components.ScreenHeader
+import com.nova.iptv.ui.components.NovaButton as Button
+import com.nova.iptv.ui.components.NovaTextButton as TextButton
+import com.nova.iptv.ui.components.NovaFilledTonalButton as FilledTonalButton
+import com.nova.iptv.ui.components.NovaIconButton as IconButton
+import com.nova.iptv.ui.components.NovaFilterChip as FilterChip
 import com.nova.iptv.ui.novaViewModel
 import com.nova.iptv.ui.theme.NovaColors
 import kotlinx.coroutines.flow.SharingStarted
@@ -79,6 +96,15 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
     fun setAutoRefresh(enabled: Boolean) = viewModelScope.launch { c.settings.setAutoRefresh(enabled) }
 
+    val downloadSettings: StateFlow<com.nova.iptv.data.DownloadSettings> = c.settings.downloads
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), com.nova.iptv.data.DownloadSettings())
+    fun setDownloadWifiOnly(enabled: Boolean) = viewModelScope.launch { c.settings.setDownloadWifiOnly(enabled) }
+    fun setDownloadQuality(quality: com.nova.iptv.data.DownloadQuality) = viewModelScope.launch { c.settings.setDownloadQuality(quality) }
+    fun setSmartDownloads(enabled: Boolean) = viewModelScope.launch { c.settings.setSmartDownloads(enabled) }
+    val offlineItems get() = c.downloads.items
+    fun offlineStorage() = c.downloads.storage()
+    fun removeAllDownloads() = c.downloads.removeAll()
+
     val parental: StateFlow<ParentalSettings> = c.parental.state
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ParentalSettings())
     val parentalUnlocked = c.parental.unlocked
@@ -98,6 +124,7 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
     val theme: StateFlow<ThemeSettings> = c.settings.theme
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeSettings())
     fun setTheme(id: NovaThemeId, accent: Int? = null) = viewModelScope.launch { c.settings.setTheme(id, accent) }
+    fun applyTvTheme(style: TvInterface) = viewModelScope.launch { c.settings.applyTvTheme(style) }
 
     /** Result / error of the last backup operation, shown in a snackbar-like message. */
     val backupMessage = MutableStateFlow<String?>(null)
@@ -171,240 +198,16 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
     fun delete(id: Long) {
         c.sync.cancel(id)
         c.epg.cancel(id)
+        c.downloads.removeProfile(id)
         viewModelScope.launch { c.profiles.delete(id) }
     }
 }
 
 @Composable
-fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit) {
+fun ProfilesScreen(onAdd: () -> Unit, onEdit: (Long) -> Unit, onOpenDownloads: () -> Unit = {}) {
     val vm = novaViewModel { ProfilesViewModel(it) }
-    val profiles by vm.profiles.collectAsStateWithLifecycle()
-    val activeId by vm.activeId.collectAsStateWithLifecycle()
-    val syncStates by vm.syncStates.collectAsStateWithLifecycle()
-    val epgStates by vm.epgStates.collectAsStateWithLifecycle()
-    val playback by vm.playback.collectAsStateWithLifecycle()
-    val theme by vm.theme.collectAsStateWithLifecycle()
-    val blocked by vm.settingsBlocked.collectAsStateWithLifecycle()
-    var toDelete by remember { mutableStateOf<ProfileEntity?>(null) }
-
-    if (blocked) {
-        var asking by remember { mutableStateOf(false) }
-        EmptyState(
-            title = "Réglages protégés",
-            message = "Le contrôle parental protège les réglages. Saisissez le code PIN pour y accéder.",
-            actionLabel = "Saisir le code",
-            onAction = { asking = true },
-            modifier = Modifier.fillMaxSize().wrapContentHeight(),
-        )
-        if (asking) {
-            PinDialog("Réglages protégés", null, onDismiss = { asking = false }) { pin ->
-                if (vm.verifyPin(pin)) null else "Code incorrect."
-            }
-        }
-        return
-    }
-
-    val list = profiles ?: return
-    LazyColumn(
-        contentPadding = PaddingValues(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        item { ScreenHeader("Réglages") }
-        item { AppearanceCard(theme, vm::setTheme) }
-        item {
-            PlaybackSettingsCard(playback, vm::setAutoplay, vm::setCountdown, vm::setGestures, vm::setFreeRotation, vm::setPictureInPicture)
-        }
-        item { LanguagesCard(vm) }
-        item { ParentalCard(vm, activeId) }
-        item { BackupCard(vm) }
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(end = 20.dp)) {
-                ScreenHeader("Profils IPTV", subtitle = "M3U / M3U8 et Xtream Codes", modifier = Modifier.weight(1f))
-                Button(onClick = onAdd) {
-                    Icon(Icons.Rounded.Add, contentDescription = null)
-                    Text("Ajouter")
-                }
-            }
-        }
-        if (list.isEmpty()) {
-            item {
-                EmptyState(
-                    "Aucun profil",
-                    "Ajoutez votre première source IPTV pour commencer.",
-                    actionLabel = "Ajouter un profil",
-                    onAction = onAdd,
-                )
-            }
-        }
-        items(list, key = { it.id }) { profile ->
-            ProfileCard(
-                profile = profile,
-                active = profile.id == activeId,
-                sync = syncStates[profile.id],
-                epg = epgStates[profile.id],
-                onActivate = { vm.activate(profile.id) },
-                onRefresh = { vm.refresh(profile.id) },
-                onRefreshGuide = { vm.refreshGuide(profile.id) },
-                onEdit = { onEdit(profile.id) },
-                onDelete = { toDelete = profile },
-            )
-        }
-    }
-
-    toDelete?.let { profile ->
-        AlertDialog(
-            onDismissRequest = { toDelete = null },
-            title = { Text("Supprimer « ${profile.name} » ?") },
-            text = { Text("Les chaînes, favoris et l'historique de ce profil seront supprimés de l'appareil.") },
-            confirmButton = {
-                TextButton(onClick = { vm.delete(profile.id); toDelete = null }) { Text("Supprimer", color = NovaColors.Error) }
-            },
-            dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Annuler") } },
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PlaybackSettingsCard(
-    settings: PlaybackSettings,
-    onAutoplay: (Boolean) -> Unit,
-    onCountdown: (Int) -> Unit,
-    onGestures: (Boolean) -> Unit,
-    onFreeRotation: (Boolean) -> Unit,
-    onPip: (Boolean) -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = NovaColors.Card,
-        border = androidx.compose.foundation.BorderStroke(1.dp, NovaColors.Border),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Lecture", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Épisode suivant automatique", fontSize = 15.sp)
-                    Text(
-                        "Propose l'épisode suivant avant la fin avec un compte à rebours.",
-                        color = NovaColors.TextSecondary,
-                        fontSize = 12.sp,
-                    )
-                }
-                Switch(checked = settings.autoplayNext, onCheckedChange = onAutoplay)
-            }
-            if (settings.autoplayNext) {
-                Text("Compte à rebours", color = NovaColors.TextSecondary, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PlaybackRules.COUNTDOWN_CHOICES.forEach { seconds ->
-                        FilterChip(
-                            selected = settings.countdownSeconds == seconds,
-                            onClick = { onCountdown(seconds) },
-                            label = { Text("$seconds s") },
-                        )
-                    }
-                }
-            }
-            SettingSwitch(
-                "Gestes luminosité / volume",
-                "Glisser à gauche : luminosité, à droite : volume. Double appui : ±10 s.",
-                settings.gesturesEnabled,
-                onGestures,
-            )
-            SettingSwitch(
-                "Rotation libre du lecteur",
-                "Désactivé : lecture en paysage uniquement.",
-                settings.freeRotation,
-                onFreeRotation,
-            )
-            SettingSwitch(
-                "Picture-in-Picture",
-                "Mobile : la vidéo continue dans une petite fenêtre quand vous quittez l'application.",
-                settings.pictureInPicture,
-                onPip,
-            )
-            Text(
-                "Minuteur de sommeil : icône lune dans le lecteur (touche Menu sur la télécommande). " +
-                    "Il est prioritaire sur la lecture automatique.",
-                color = NovaColors.TextSecondary,
-                fontSize = 12.sp,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SettingSwitch(title: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 15.sp)
-            Text(description, color = NovaColors.TextSecondary, fontSize = 12.sp)
-        }
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
-
-@Composable
-private fun ProfileCard(
-    profile: ProfileEntity,
-    active: Boolean,
-    sync: SyncManager.State?,
-    epg: EpgManager.State?,
-    onActivate: () -> Unit,
-    onRefresh: () -> Unit,
-    onRefreshGuide: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = NovaColors.Card,
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (active) NovaColors.Cyan else NovaColors.Border),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(profile.name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false))
-                Text(
-                    if (profile.type == ProfileType.M3U) "M3U" else "Xtream",
-                    fontSize = 11.sp,
-                    color = NovaColors.Violet,
-                    fontWeight = FontWeight.Bold,
-                )
-                if (active) Icon(Icons.Rounded.CheckCircle, contentDescription = "Profil actif", tint = NovaColors.Cyan, modifier = Modifier.size(18.dp))
-            }
-            val status = when {
-                sync is SyncManager.State.Running -> "Synchronisation… ${sync.loaded} contenus"
-                sync is SyncManager.State.Failed -> "Erreur : ${sync.message}"
-                profile.lastSyncError != null -> "Erreur : ${profile.lastSyncError}"
-                profile.lastSyncAt != null -> "${profile.contentCount} contenus · actualisé " +
-                    DateUtils.getRelativeTimeSpanString(profile.lastSyncAt).toString().lowercase()
-                else -> "Jamais synchronisé"
-            }
-            val isError = sync is SyncManager.State.Failed || (sync == null && profile.lastSyncError != null)
-            Text(status, fontSize = 13.sp, color = if (isError) NovaColors.Error else NovaColors.TextSecondary)
-            val guide = when {
-                epg is EpgManager.State.Running -> "Guide TV : chargement… ${epg.programmes} programmes"
-                epg is EpgManager.State.Failed -> "Guide TV : ${epg.message}"
-                profile.epgError != null -> "Guide TV : ${profile.epgError}"
-                profile.epgSyncedAt != null -> "Guide TV actualisé " +
-                    DateUtils.getRelativeTimeSpanString(profile.epgSyncedAt).toString().lowercase()
-                else -> "Guide TV : pas encore chargé"
-            }
-            val guideError = epg is EpgManager.State.Failed || (epg == null && profile.epgError != null)
-            Text(guide, fontSize = 13.sp, color = if (guideError) NovaColors.Error else NovaColors.TextSecondary)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
-                if (!active) FilledTonalButton(onClick = onActivate) { Text("Utiliser") }
-                TextButton(onClick = onRefresh, enabled = sync !is SyncManager.State.Running) { Text("Actualiser") }
-                TextButton(onClick = onRefreshGuide, enabled = epg !is EpgManager.State.Running) { Text("Guide TV") }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onEdit) { Text("Modifier") }
-                TextButton(onClick = onDelete) { Text("Supprimer", color = NovaColors.Error) }
-            }
-        }
-    }
+    // Mobile and TV share the same sectioned settings; phones in portrait use compact tabs.
+    TvSettingsScreen(vm, onAdd, onEdit, compact = !isTvLayout(), onOpenDownloads = onOpenDownloads)
 }
 
 data class ProfileForm(
@@ -480,6 +283,9 @@ fun ProfileEditScreen(profileId: Long?, onDone: () -> Unit) {
     val vm = novaViewModel(key = "edit-$profileId") { ProfileEditViewModel(it, profileId) }
     if (!vm.loaded) return
     val f = vm.form
+    var passwordVisible by remember(profileId) { mutableStateOf(false) }
+    val saveFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
 
     LazyColumn(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
@@ -507,76 +313,78 @@ fun ProfileEditScreen(profileId: Long?, onDone: () -> Unit) {
             }
         }
         item {
-            OutlinedTextField(
+            ProfileTextField(
                 value = f.name,
                 onValueChange = { v -> vm.update { copy(name = v) } },
-                label = { Text("Nom du profil (facultatif)") },
-                singleLine = true,
+                label = "Nom du profil (facultatif)",
                 modifier = Modifier.fillMaxWidth(),
             )
         }
         item {
-            OutlinedTextField(
+            ProfileTextField(
                 value = f.url,
                 onValueChange = { v -> vm.update { copy(url = v) } },
-                label = { Text(if (f.type == ProfileType.M3U) "Adresse de la playlist (URL)" else "Adresse du serveur") },
-                placeholder = { Text(if (f.type == ProfileType.M3U) "https://exemple.com/playlist.m3u" else "http://serveur.com:8080") },
-                singleLine = true,
+                label = if (f.type == ProfileType.M3U) "Adresse de la playlist (URL)" else "Adresse du serveur",
+                placeholder = if (f.type == ProfileType.M3U) "https://exemple.com/playlist.m3u" else "http://serveur.com:8080",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
         if (f.type == ProfileType.XTREAM) {
             item {
-                OutlinedTextField(
+                ProfileTextField(
                     value = f.username,
                     onValueChange = { v -> vm.update { copy(username = v) } },
-                    label = { Text("Nom d'utilisateur") },
-                    singleLine = true,
+                    label = "Nom d'utilisateur",
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             item {
-                OutlinedTextField(
+                ProfileTextField(
                     value = f.password,
                     onValueChange = { v -> vm.update { copy(password = v) } },
-                    label = { Text(if (f.hasStoredPassword) "Mot de passe (laisser vide pour conserver)" else "Mot de passe") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
+                    label = if (f.hasStoredPassword) "Mot de passe (laisser vide pour conserver)" else "Mot de passe",
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                contentDescription = if (passwordVisible) "Masquer le mot de passe" else "Afficher le mot de passe",
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
         f.error?.let { item { Text(it, color = NovaColors.Error, fontSize = 14.sp) } }
         item {
-            OutlinedTextField(
-                value = f.epgUrl,
-                onValueChange = { v -> vm.update { copy(epgUrl = v) } },
-                label = { Text("Guide TV XMLTV (facultatif)") },
-                placeholder = { Text("https://exemple.com/guide.xml.gz") },
-                supportingText = {
-                    Text(
-                        if (f.type == ProfileType.M3U) "Vide : guide indiqué dans la playlist (url-tvg)."
-                        else "Vide : guide fourni par le serveur Xtream."
-                    )
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        item {
-            Text(
-                "Le mot de passe est chiffré sur l'appareil (Android Keystore). Le catalogue est chargé progressivement : " +
-                    "vous pouvez naviguer pendant la synchronisation.",
-                color = NovaColors.TextSecondary,
-                fontSize = 12.sp,
-            )
-        }
-        item {
-            Button(onClick = { vm.save(onDone) }, enabled = !f.saving, modifier = Modifier.fillMaxWidth().height(50.dp)) {
-                Text(if (profileId == null) "Enregistrer et charger" else "Enregistrer et actualiser")
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                ProfileTextField(
+                    value = f.epgUrl,
+                    onValueChange = { v -> vm.update { copy(epgUrl = v) } },
+                    label = "Guide TV XMLTV (facultatif)",
+                    placeholder = "https://exemple.com/guide.xml.gz",
+                    supportingText = if (f.type == ProfileType.M3U) "Vide : guide indiqué dans la playlist (url-tvg)."
+                        else "Vide : guide fourni par le serveur Xtream.",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = {
+                        keyboard?.hide()
+                        saveFocus.requestFocus()
+                    }),
+                    modifier = Modifier.fillMaxWidth().focusProperties { down = saveFocus },
+                    nextFocus = saveFocus,
+                )
+                Text(
+                    "Le mot de passe est chiffré sur l'appareil (Android Keystore). Le catalogue est chargé progressivement : " +
+                        "vous pouvez naviguer pendant la synchronisation.",
+                    color = NovaColors.TextSecondary,
+                    fontSize = 12.sp,
+                )
+                Button(onClick = { vm.save(onDone) }, enabled = !f.saving, modifier = Modifier.fillMaxWidth().height(50.dp).focusRequester(saveFocus)) {
+                    Text(if (profileId == null) "Enregistrer et charger" else "Enregistrer et actualiser")
+                }
             }
         }
     }

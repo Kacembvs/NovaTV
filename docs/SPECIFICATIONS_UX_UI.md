@@ -58,6 +58,61 @@ Prévoir cinq thèmes :
 
 Le changement de thème doit être immédiat, sans redémarrage de l'application.
 
+## 1.4 Interfaces structurelles TV
+
+Sur TV uniquement, sélectionner une interface applique sa disposition et sa
+palette par défaut en une seule opération. La palette peut ensuite être modifiée
+manuellement ; resélectionner une interface rétablit ses couleurs.
+L'apparence propose sept interfaces NOVA originales, sans logos ni reproduction écran par écran
+des services ayant inspiré la direction artistique :
+
+| Interface | Organisation |
+|---|---|
+| Classique (défaut) | Barre latérale fixe, catégories latérales et grilles ; ancien parcours conservé. |
+| Cinéma | Rail compact, grande scène immersive sans affiche secondaire, affiches verticales, catégories horizontales, direct en mosaïque. |
+| Univers | Navigation haute, collections issues des catégories réelles, grandes affiches, direct en mosaïque. |
+| Antenne | Navigation haute, direct en tête, programmes maintenant/ensuite, catalogue paysage et catégories latérales. |
+| Horizon | Rail compact, reprises avant la scène de découverte, cartes paysage et catégories horizontales. |
+| Guide | Barre latérale, raccourcis TV prioritaires, listes détaillées pour les catalogues, direct en trois zones et grille EPG plus dense. |
+| NOVA+ | Direction noir et blanc, angles sobres, navigation haute, scène de présentation suivie du direct et des collections, affiches et liste de programmes. |
+
+Le style s'applique aussi aux fiches, cartes de recherche, réglages et panneaux du
+lecteur. Les contenus et actions restent les mêmes ; les collections ouvrent une
+catégorie réellement filtrée, sans catalogue fictif.
+
+Le passage d'un style à l'autre doit conserver la destination et la section de
+réglages ouverte. Le choix est mémorisé et sauvegardé ; les anciennes sauvegardes
+restent compatibles. La restauration conserve la palette sauvegardée, même si
+elle diffère de celle du style. Les palettes par défaut sont Stream Red pour
+Cinéma, Cinema Gold pour Antenne, NOVA+ Noir et blanc pour NOVA+ et NOVA Blue
+pour les autres interfaces.
+En portrait, le mobile conserve sa disposition. En paysage, téléphones et tablettes
+affichent l'interface TV choisie, réduite proportionnellement si l'écran fait moins
+de 480 dp de haut, et utilisable au toucher. Les comportements propres à la
+télécommande (saisie après OK, commandes du lecteur) restent réservés aux vraies TV.
+
+Règles de télécommande :
+- Menu latéral : Droite vers le contenu ; navigation haute : Bas vers le contenu.
+- Catégories horizontales : Bas vers les résultats, Haut depuis la première rangée
+  vers les catégories.
+- Réglages latéraux : Haut/Bas choisit, Droite/OK entre, Gauche revient aux sections.
+- Réglages horizontaux : Gauche/Droite choisit, Bas/OK entre, Haut depuis la première
+  action revient aux sections.
+- Le focus reste distinct de l'option active. Aucun champ ne déclenche de clavier
+  au simple passage des flèches ; OK active explicitement la saisie.
+- Le lecteur conserve ses boutons sombres compacts et son contour de focus lisible,
+  même avec une palette claire.
+- Les surfaces, angles, couleurs de sélection et progression du lecteur suivent
+  l'interface choisie. Une palette claire utilise une déclinaison sombre neutre
+  dans le lecteur ; les indicateurs de focus restent transparents au centre.
+- Sur TV, le bandeau n'affiche qu'une suggestion à la fois : Droite depuis
+  « Détails » reste sur ce bouton. Le défilement manuel reste disponible sur les
+  commandes précédent/suivant du carrousel.
+
+Validation locale : tests Compose/Robolectric à 960 × 540 pour les structures et
+les parcours introduits, avec captures des accueils alternatifs. La validation matérielle
+Fire TV/TCL demeure nécessaire ; les tests locaux ne la certifient pas.
+
 ---
 
 # 2. IDENTITÉ ET LOGO
@@ -81,6 +136,11 @@ Prévoir les déclinaisons suivantes :
 - Logo adapté aux fonds clairs et foncés.
 
 Éviter les animations complexes au démarrage.
+
+L'icône par défaut déclarée par l'APK doit être un PNG opaque à toutes les
+densités (le lanceur Fire TV ne lit pas les icônes adaptatives XML), avec une
+bannière PNG de lancement. L'icône adaptative est réservée aux écrans tactiles.
+Vérifier avec `aapt2 dump badging` ; l'essai sur le lanceur Fire TV reste indispensable.
 
 ---
 
@@ -510,6 +570,24 @@ Permettre de :
 Permettre de mémoriser les langues audio et sous-titres préférées.
 
 Appliquer les préférences lorsque les pistes correspondantes sont disponibles.
+
+### 9.9 Téléchargements hors ligne
+
+Sur le modèle des grandes applications de streaming :
+
+- Bouton « Télécharger » sur la fiche film, icône par épisode avec anneau de
+  progression et « Télécharger la saison ». Appui suivant : pause, reprise, annulation
+  ou suppression.
+- Écran « Téléchargements » (onglet « Hors ligne » sur téléphone, bouton de l'accueil
+  et section des réglages ailleurs) : séries regroupées en dossiers, épisodes dans
+  l'ordre, état et taille de chaque élément, espace utilisé et espace libre.
+- Téléchargements en arrière-plan avec notification de progression et de fin,
+  2 simultanés au maximum, reprise automatique après coupure ou redémarrage.
+- Wi-Fi uniquement par défaut ; qualité Standard (720p) ou Haute pour les flux HLS.
+- Téléchargements intelligents : un épisode téléchargé regardé jusqu'au bout est
+  supprimé et l'épisode suivant de la file est téléchargé.
+- Lecture hors connexion depuis le fichier local ; bannière « Vous êtes hors ligne »
+  menant aux téléchargements. La suppression d'un profil supprime ses téléchargements.
 
 ---
 
