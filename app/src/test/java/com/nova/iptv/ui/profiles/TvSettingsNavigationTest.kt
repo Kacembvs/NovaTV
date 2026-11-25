@@ -112,7 +112,7 @@ class TvSettingsNavigationTest {
             vm.theme.value.tvInterface == TvInterface.GUIDE
         }
         assertEquals(TvInterface.GUIDE, runBlocking { container.settings.theme.first().tvInterface })
-        assertEquals(NovaThemeId.NOVA_BLUE, runBlocking { container.settings.theme.first().theme })
+        assertEquals(NovaThemeId.GUIDE_EMERALD, runBlocking { container.settings.theme.first().theme })
         compose.onNodeWithText("NOVA Guide", substring = true).assertIsSelected().assertIsFocused()
             .performKeyInput { pressKey(Key.DirectionLeft) }
         compose.onNode(hasText("Apparence") and hasClickAction()).assertIsFocused()

@@ -1,11 +1,13 @@
 import AVKit
 import Combine
+import MediaPlayer
 import SwiftData
 import SwiftUI
 import VLCKitSPM
 
 enum PlaybackEngine: Equatable {
     case apple, vlc
+    var label: String { self == .apple ? "Lecteur Apple" : "Moteur VLC intégré" }
 }
 
 struct PlaybackRequest: Identifiable {
@@ -67,6 +69,19 @@ enum SleepChoice: Equatable {
     case off, minutes(Int), endOfItem
 }
 
+/// Same choices as Android's "Format d'image".
+enum VideoFit: String, CaseIterable, Identifiable {
+    case fit, fill, stretch
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .fit: return "Ajuster"
+        case .fill: return "Remplir l'écran"
+        case .stretch: return "Étirer"
+        }
+    }
+}
+
 struct TrackChoice: Identifiable, Equatable {
     let id: Int32
     let name: String
@@ -84,34 +99,47 @@ final class PlayerController: ObservableObject {
     @Published var nextCountdown: Int?
     @Published var sleep: SleepChoice = .off
     @Published var finished = false
+    /// "Reprise à …" banner shown for a few seconds after resuming.
+    @Published var resumedFrom: Double?
 
-    // State of the built-in VLC engine (Apple's player draws its own controls).
-    @Published private(set) var vlcTime: Double = 0
-    @Published private(set) var vlcDuration: Double = 0
-    @Published private(set) var vlcPlaying = false
-    @Published private(set) var vlcBuffering = true
+    // Shared state of both engines, drawn by NOVA's own controls.
+    @Published private(set) var time: Double = 0
+    @Published private(set) var duration: Double = 0
+    @Published private(set) var playing = false
+    @Published private(set) var buffering = true
     @Published private(set) var audioTracks: [TrackChoice] = []
     @Published private(set) var subtitleTracks: [TrackChoice] = []
     @Published private(set) var currentAudio: Int32 = -1
     @Published private(set) var currentSubtitle: Int32 = -1
     @Published private(set) var rate: Float = 1
+    @Published private(set) var fit = VideoFit.fit
+    @Published private(set) var videoSize: CGSize = .zero
+    @Published private(set) var bitrate: Double = 0
+
+    /// Set by the Apple video view; used for "Format d'image" and Picture-in-Picture.
+    weak var playerLayer: AVPlayerLayer?
+    /// Size of the video surface, needed to fill or stretch with the VLC engine.
+    var surfaceSize: CGSize = .zero
 
     private let context: ModelContext
     private let settings: AppSettings
     private let downloads: DownloadCenter
-    private var timeObserver: Any?
     private var cancellables = Set<AnyCancellable>()
     private var itemCancellables = Set<AnyCancellable>()
     private var countdownTask: Task<Void, Never>?
     private var sleepTask: Task<Void, Never>?
-    private var vlcTimer: Timer?
+    private var resumeTask: Task<Void, Never>?
+    private var ticker: Timer?
     private var currentURL: URL?
     private var playURL: URL?
     private var resumeAt: Double = 0
-    private var vlcLanguagesApplied = false
+    private var languagesApplied = false
     private var vlcEndHandled = false
     private var appleFailedOnce = false
     private var vlcPendingPlay = false
+    private var lastSave = Date.distantPast
+    private var audibleGroup: AVMediaSelectionGroup?
+    private var legibleGroup: AVMediaSelectionGroup?
 
     init(request: PlaybackRequest, profile: Profile, context: ModelContext, settings: AppSettings, downloads: DownloadCenter) {
         items = request.items
@@ -122,9 +150,6 @@ final class PlayerController: ObservableObject {
         self.downloads = downloads
         player.allowsExternalPlayback = true
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 10, preferredTimescale: 1), queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.saveProgress() }
-        }
         NotificationCenter.default.publisher(for: AVPlayerItem.didPlayToEndTimeNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] note in
@@ -132,16 +157,10 @@ final class PlayerController: ObservableObject {
                 self.itemEnded()
             }
             .store(in: &cancellables)
-        NotificationCenter.default.publisher(for: AVPlayerItem.mediaSelectionDidChangeNotification)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] note in
-                guard let self, (note.object as? AVPlayerItem) === self.player.currentItem else { return }
-                self.rememberAppleLanguages()
-            }
-            .store(in: &cancellables)
-        vlcTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tickVLC() }
+        ticker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
         }
+        setupRemoteCommands()
         load(index, resume: !request.fromStart)
     }
 
@@ -150,7 +169,9 @@ final class PlayerController: ObservableObject {
     var hasNext: Bool { index + 1 < items.count }
     var streamURL: URL? { currentURL }
     var gesturesEnabled: Bool { settings.gesturesEnabled }
-    var pictureInPicture: Bool { settings.pictureInPicture }
+    var pictureInPictureAllowed: Bool { settings.pictureInPicture && engine == .apple }
+    /// True while the full-screen NOVA player shows this controller (false in the mini-player).
+    var isPresented = false
 
     var title: String {
         if let subtitle = current.subtitle { return "\(current.title) · \(subtitle)" }
@@ -166,7 +187,7 @@ final class PlayerController: ObservableObject {
     // MARK: Loading
 
     func load(_ newIndex: Int, resume: Bool, forceEngine: PlaybackEngine? = nil) {
-        saveProgress()
+        saveProgress(force: true)
         countdownTask?.cancel()
         nextCountdown = nil
         error = nil
@@ -184,10 +205,12 @@ final class PlayerController: ObservableObject {
         if resume, item.kind != .live, let history = context.history(profile.id, item.ref), history.isResumable {
             resumeAt = history.position
         }
+        showResumeBanner(resumeAt)
         let wanted: PlaybackEngine = forceEngine
             ?? (settings.internalEngine == .vlc || Self.needsVLC(source) ? .vlc : .apple)
         if forceEngine == nil { appleFailedOnce = false }
         context.saveProgress(profileID: profile.id, item: item, position: resumeAt, duration: 0)
+        resetTrackState()
         switch wanted {
         case .apple:
             playURL = local ?? StreamURLs.appleCompatible(source, kind: item.kind)
@@ -195,6 +218,33 @@ final class PlayerController: ObservableObject {
         case .vlc:
             playURL = source
             startVLC()
+        }
+        updateNowPlaying()
+    }
+
+    private func resetTrackState() {
+        time = 0
+        duration = 0
+        buffering = true
+        languagesApplied = false
+        audioTracks = []
+        subtitleTracks = []
+        currentAudio = -1
+        currentSubtitle = -1
+        audibleGroup = nil
+        legibleGroup = nil
+        videoSize = .zero
+        bitrate = 0
+    }
+
+    private func showResumeBanner(_ position: Double) {
+        resumeTask?.cancel()
+        resumedFrom = position > 0 ? position : nil
+        guard position > 0 else { return }
+        resumeTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.resumedFrom = nil
         }
     }
 
@@ -212,7 +262,7 @@ final class PlayerController: ObservableObject {
             .sink { [weak self, weak playerItem] status in
                 guard let self, let playerItem, playerItem === self.player.currentItem else { return }
                 switch status {
-                case .readyToPlay: Task { await self.applyAppleLanguages(playerItem) }
+                case .readyToPlay: Task { await self.loadAppleTracks(playerItem) }
                 case .failed: self.appleFailed(playerItem.error)
                 default: break
                 }
@@ -220,7 +270,9 @@ final class PlayerController: ObservableObject {
             .store(in: &itemCancellables)
         player.replaceCurrentItem(with: playerItem)
         if resumeAt > 0 { player.seek(to: CMTime(seconds: resumeAt, preferredTimescale: 600)) }
+        player.rate = rate
         player.play()
+        applyFit()
     }
 
     /// Apple could not read the stream: retry once with the built-in VLC engine.
@@ -231,6 +283,7 @@ final class PlayerController: ObservableObject {
             let position = player.currentTime().seconds
             if position.isFinite, position > 5 { resumeAt = position }
             playURL = downloads.record(profile.id, current.ref).flatMap { downloads.localURL($0) } ?? currentURL
+            resetTrackState()
             startVLC()
             return
         }
@@ -238,8 +291,9 @@ final class PlayerController: ObservableObject {
     }
 
     func switchEngine() {
-        let position = currentSeconds
+        let position = time
         if position.isFinite, position > 5 { resumeAt = position }
+        resetTrackState()
         if engine == .apple {
             appleFailedOnce = true
             playURL = downloads.record(profile.id, current.ref).flatMap { downloads.localURL($0) } ?? currentURL
@@ -259,20 +313,13 @@ final class PlayerController: ObservableObject {
         engine = .vlc
         error = nil
         guard let url = playURL else { return }
-        vlcTime = 0
-        vlcDuration = 0
-        vlcBuffering = true
-        vlcLanguagesApplied = false
         vlcEndHandled = false
-        audioTracks = []
-        subtitleTracks = []
         let media = VLCMedia(url: url)
         media.addOption(":http-user-agent=NOVA-IPTV/1.0 (iOS)")
         media.addOption(":network-caching=\(isLive ? 2000 : 1500)")
         if resumeAt > 0 { media.addOption(":start-time=\(Int(resumeAt))") }
         vlc.media = media
         vlc.rate = rate
-        // VLC needs its drawing surface before starting; SwiftUI creates it on the next layout pass.
         if surfaceReady { vlc.play() } else { vlcPendingPlay = true }
     }
 
@@ -281,39 +328,61 @@ final class PlayerController: ObservableObject {
         if vlcPendingPlay {
             vlcPendingPlay = false
             vlc.play()
+            applyFit()
         }
     }
 
     private func stopVLC() {
         if vlc.media != nil { vlc.stop() }
-        vlcPlaying = false
+    }
+
+    // MARK: Periodic state
+
+    private func tick() {
+        switch engine {
+        case .apple: tickApple()
+        case .vlc: tickVLC()
+        }
+        if Date().timeIntervalSince(lastSave) > 10 { saveProgress() }
+    }
+
+    private func tickApple() {
+        let now = player.currentTime().seconds
+        if now.isFinite { time = now }
+        let d = player.currentItem?.duration.seconds ?? 0
+        duration = d.isFinite && d > 0 ? d : 0
+        playing = player.timeControlStatus == .playing
+        buffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        if let item = player.currentItem {
+            if item.presentationSize != .zero { videoSize = item.presentationSize }
+            if let event = item.accessLog()?.events.last, event.indicatedBitrate > 0 { bitrate = event.indicatedBitrate }
+        }
     }
 
     private func tickVLC() {
-        guard engine == .vlc else { return }
-        vlcTime = Double(vlc.time.intValue) / 1000
+        time = Double(vlc.time.intValue) / 1000
         let length = Double(vlc.media?.length.intValue ?? 0) / 1000
-        if length > 0 { vlcDuration = length }
-        vlcPlaying = vlc.isPlaying
+        if length > 0 { duration = length }
+        playing = vlc.isPlaying
+        if vlc.videoSize != .zero { videoSize = vlc.videoSize }
         switch vlc.state {
-        case .buffering, .opening: vlcBuffering = !vlc.isPlaying
+        case .buffering, .opening: buffering = !vlc.isPlaying
         case .playing:
-            vlcBuffering = false
+            buffering = false
             refreshVLCTracks()
-            if !vlcLanguagesApplied { applyVLCLanguages() }
+            if !languagesApplied { applyVLCLanguages() }
         case .error:
-            vlcBuffering = false
+            buffering = false
             error = "Lecture impossible avec le moteur VLC : flux indisponible ou format non pris en charge."
         case .ended:
-            vlcBuffering = false
+            buffering = false
             if !vlcEndHandled {
                 vlcEndHandled = true
                 if isLive { error = "Le flux s'est interrompu." } else { itemEnded() }
             }
         default:
-            vlcBuffering = false
+            buffering = false
         }
-        if Int(vlcTime) % 10 == 0, vlcTime > 0 { saveProgress() }
     }
 
     // MARK: Tracks and languages
@@ -322,7 +391,7 @@ final class PlayerController: ObservableObject {
         func tracks(_ names: [Any]?, _ indexes: [Any]?) -> [TrackChoice] {
             let n = (names as? [String]) ?? []
             let i = ((indexes as? [NSNumber]) ?? []).map(\.int32Value)
-            return zip(i, n).map { TrackChoice(id: $0.0, name: $0.1) }
+            return zip(i, n).filter { $0.0 >= 0 }.map { TrackChoice(id: $0.0, name: $0.1) }
         }
         let audio = tracks(vlc.audioTrackNames, vlc.audioTrackIndexes)
         let subs = tracks(vlc.videoSubTitlesNames, vlc.videoSubTitlesIndexes)
@@ -345,12 +414,12 @@ final class PlayerController: ObservableObject {
 
     private func applyVLCLanguages() {
         guard !audioTracks.isEmpty || !subtitleTracks.isEmpty else { return }
-        vlcLanguagesApplied = true
-        if let code = settings.audioLanguage, let track = audioTracks.first(where: { $0.id >= 0 && Self.matches($0.name, language: code) }) {
+        languagesApplied = true
+        if let code = settings.audioLanguage, let track = audioTracks.first(where: { Self.matches($0.name, language: code) }) {
             vlc.currentAudioTrackIndex = track.id
         }
         if let code = settings.subtitleLanguage {
-            if let track = subtitleTracks.first(where: { $0.id >= 0 && Self.matches($0.name, language: code) }) {
+            if let track = subtitleTracks.first(where: { Self.matches($0.name, language: code) }) {
                 vlc.currentVideoSubTitleIndex = track.id
             }
         } else {
@@ -359,36 +428,42 @@ final class PlayerController: ObservableObject {
         refreshVLCTracks()
     }
 
-    /// A choice made in the player becomes the new preference, like on Android.
-    func selectAudio(_ track: TrackChoice) {
-        vlc.currentAudioTrackIndex = track.id
-        if let code = preferredLanguageCodes.first(where: { Self.matches(track.name, language: $0) }) { settings.audioLanguage = code }
-        refreshVLCTracks()
-    }
-
-    func selectSubtitle(_ track: TrackChoice?) {
-        vlc.currentVideoSubTitleIndex = track?.id ?? -1
-        if let track {
-            if let code = preferredLanguageCodes.first(where: { Self.matches(track.name, language: $0) }) { settings.subtitleLanguage = code }
-        } else {
-            settings.subtitleLanguage = nil
-        }
-        refreshVLCTracks()
-    }
-
-    private func applyAppleLanguages(_ item: AVPlayerItem) async {
+    private func loadAppleTracks(_ item: AVPlayerItem) async {
         let asset = item.asset
-        if let code = settings.audioLanguage, let group = try? await asset.loadMediaSelectionGroup(for: .audible),
-           let option = group.options.first(where: { Self.code(of: $0) == code }) {
-            item.select(option, in: group)
-        }
-        if let group = try? await asset.loadMediaSelectionGroup(for: .legible) {
-            if let code = settings.subtitleLanguage {
-                if let option = group.options.first(where: { Self.code(of: $0) == code }) { item.select(option, in: group) }
-            } else if group.allowsEmptySelection {
-                item.select(nil, in: group)
+        audibleGroup = try? await asset.loadMediaSelectionGroup(for: .audible)
+        legibleGroup = try? await asset.loadMediaSelectionGroup(for: .legible)
+        guard item === player.currentItem else { return }
+        if !languagesApplied {
+            languagesApplied = true
+            if let code = settings.audioLanguage, let group = audibleGroup,
+               let option = group.options.first(where: { Self.code(of: $0) == code }) {
+                item.select(option, in: group)
+            }
+            if let group = legibleGroup {
+                if let code = settings.subtitleLanguage {
+                    if let option = group.options.first(where: { Self.code(of: $0) == code }) { item.select(option, in: group) }
+                } else if group.allowsEmptySelection {
+                    item.select(nil, in: group)
+                }
             }
         }
+        refreshAppleTracks()
+    }
+
+    private func refreshAppleTracks() {
+        guard let item = player.currentItem else { return }
+        func list(_ group: AVMediaSelectionGroup?) -> [TrackChoice] {
+            (group?.options ?? []).enumerated().map { TrackChoice(id: Int32($0.offset), name: $0.element.displayName) }
+        }
+        func selected(_ group: AVMediaSelectionGroup?) -> Int32 {
+            guard let group, let option = item.currentMediaSelection.selectedMediaOption(in: group),
+                  let index = group.options.firstIndex(of: option) else { return -1 }
+            return Int32(index)
+        }
+        audioTracks = list(audibleGroup)
+        subtitleTracks = list(legibleGroup)
+        currentAudio = selected(audibleGroup)
+        currentSubtitle = selected(legibleGroup)
     }
 
     private static func code(of option: AVMediaSelectionOption) -> String? {
@@ -396,45 +471,55 @@ final class PlayerController: ObservableObject {
         return option.locale?.language.languageCode?.identifier
     }
 
-    private func rememberAppleLanguages() {
-        guard let item = player.currentItem else { return }
-        Task {
-            let asset = item.asset
-            if let group = try? await asset.loadMediaSelectionGroup(for: .audible),
-               let option = item.currentMediaSelection.selectedMediaOption(in: group), let code = Self.code(of: option) {
-                settings.audioLanguage = code
+    /// A choice made in the player becomes the new preference, like on Android.
+    func selectAudio(_ track: TrackChoice) {
+        if engine == .vlc {
+            vlc.currentAudioTrackIndex = track.id
+            if let code = preferredLanguageCodes.first(where: { Self.matches(track.name, language: $0) }) { settings.audioLanguage = code }
+            refreshVLCTracks()
+        } else if let group = audibleGroup, group.options.indices.contains(Int(track.id)) {
+            let option = group.options[Int(track.id)]
+            player.currentItem?.select(option, in: group)
+            if let code = Self.code(of: option) { settings.audioLanguage = code }
+            refreshAppleTracks()
+        }
+    }
+
+    func selectSubtitle(_ track: TrackChoice?) {
+        if engine == .vlc {
+            vlc.currentVideoSubTitleIndex = track?.id ?? -1
+            if let track {
+                if let code = preferredLanguageCodes.first(where: { Self.matches(track.name, language: $0) }) { settings.subtitleLanguage = code }
+            } else {
+                settings.subtitleLanguage = nil
             }
-            if let group = try? await asset.loadMediaSelectionGroup(for: .legible) {
-                if let option = item.currentMediaSelection.selectedMediaOption(in: group) {
-                    if let code = Self.code(of: option) { settings.subtitleLanguage = code }
-                } else {
-                    settings.subtitleLanguage = nil
-                }
+            refreshVLCTracks()
+        } else if let group = legibleGroup {
+            if let track, group.options.indices.contains(Int(track.id)) {
+                let option = group.options[Int(track.id)]
+                player.currentItem?.select(option, in: group)
+                if let code = Self.code(of: option) { settings.subtitleLanguage = code }
+            } else {
+                player.currentItem?.select(nil, in: group)
+                settings.subtitleLanguage = nil
             }
+            refreshAppleTracks()
         }
     }
 
     // MARK: Transport
 
-    var currentSeconds: Double {
-        engine == .vlc ? vlcTime : player.currentTime().seconds
-    }
-
-    var durationSeconds: Double {
-        if engine == .vlc { return vlcDuration }
-        let d = player.currentItem?.duration.seconds ?? 0
-        return d.isFinite ? d : 0
-    }
-
     func togglePlay() {
         if engine == .vlc {
             if vlc.isPlaying { vlc.pause() } else { vlc.play() }
-            vlcPlaying.toggle()
         } else if player.timeControlStatus == .playing {
             player.pause()
         } else {
             player.play()
+            player.rate = rate
         }
+        playing.toggle()
+        updateNowPlaying()
     }
 
     func skip(_ seconds: Int32) {
@@ -444,20 +529,87 @@ final class PlayerController: ObservableObject {
             let target = player.currentTime().seconds + Double(seconds)
             player.seek(to: CMTime(seconds: max(0, target), preferredTimescale: 600))
         }
+        time = max(0, time + Double(seconds))
     }
 
     func seek(toFraction fraction: Double) {
+        let value = max(0, min(1, fraction))
         if engine == .vlc {
-            vlc.position = Float(max(0, min(1, fraction)))
-            vlcTime = fraction * vlcDuration
-        } else if durationSeconds > 0 {
-            player.seek(to: CMTime(seconds: fraction * durationSeconds, preferredTimescale: 600))
+            vlc.position = Float(value)
+        } else if duration > 0 {
+            player.seek(to: CMTime(seconds: value * duration, preferredTimescale: 600))
+        }
+        time = value * duration
+    }
+
+    func restartFromBeginning() {
+        resumedFrom = nil
+        seek(toFraction: 0)
+    }
+
+    func replay() {
+        finished = false
+        restartFromBeginning()
+        if engine == .vlc {
+            if vlc.state == .ended || vlc.state == .stopped { load(index, resume: false, forceEngine: .vlc) } else { vlc.play() }
+        } else {
+            player.play()
         }
     }
 
     func setRate(_ value: Float) {
         rate = value
-        if engine == .vlc { vlc.rate = value } else { player.rate = value }
+        if engine == .vlc { vlc.rate = value } else if player.timeControlStatus == .playing { player.rate = value }
+    }
+
+    func setFit(_ value: VideoFit) {
+        fit = value
+        applyFit()
+    }
+
+    func applyFit() {
+        switch engine {
+        case .apple:
+            playerLayer?.videoGravity = fit == .fit ? .resizeAspect : (fit == .fill ? .resizeAspectFill : .resize)
+        case .vlc:
+            let ratio = surfaceSize.width > 0 && surfaceSize.height > 0 ? "\(Int(surfaceSize.width)):\(Int(surfaceSize.height))" : nil
+            vlc.videoAspectRatio = fit == .stretch ? ratio.flatMap { strdup($0) } : nil
+            vlc.videoCropGeometry = fit == .fill ? ratio.flatMap { strdup($0) } : nil
+        }
+    }
+
+    // MARK: Lock screen / Control Center
+
+    private func setupRemoteCommands() {
+        let center = MPRemoteCommandCenter.shared()
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated { self?.togglePlay() }
+            return .success
+        }
+        center.playCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated { if self?.playing == false { self?.togglePlay() } }
+            return .success
+        }
+        center.pauseCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated { if self?.playing == true { self?.togglePlay() } }
+            return .success
+        }
+        center.nextTrackCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated { self?.next() }
+            return .success
+        }
+    }
+
+    private func updateNowPlaying() {
+        var info: [String: Any] = [MPMediaItemPropertyTitle: current.subtitle ?? current.title,
+                                   MPNowPlayingInfoPropertyIsLiveStream: isLive,
+                                   MPNowPlayingInfoPropertyPlaybackRate: playing ? Double(rate) : 0]
+        if current.subtitle != nil { info[MPMediaItemPropertyArtist] = current.title }
+        if duration > 0 {
+            info[MPMediaItemPropertyPlaybackDuration] = duration
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = time
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     private func metadata(for item: PlayableItem) -> [AVMetadataItem] {
@@ -493,22 +645,20 @@ final class PlayerController: ObservableObject {
 
     private func markFinishedIfNeeded() {
         guard !isLive else { return }
-        let duration = durationSeconds
-        if duration > 0, currentSeconds > duration * 0.9 {
+        if duration > 0, time > duration * 0.9 {
             context.saveProgress(profileID: profile.id, item: current, position: duration, duration: duration)
         }
     }
 
-    func saveProgress() {
-        guard !isLive else { return }
-        let position = currentSeconds
-        guard position.isFinite, position > 0 else { return }
-        context.saveProgress(profileID: profile.id, item: current, position: position, duration: durationSeconds)
+    func saveProgress(force: Bool = false) {
+        lastSave = Date()
+        guard !isLive, time.isFinite, time > 0 else { return }
+        context.saveProgress(profileID: profile.id, item: current, position: time, duration: duration)
+        updateNowPlaying()
     }
 
     private func itemEnded() {
         guard !isLive else { return }
-        let duration = durationSeconds
         context.saveProgress(profileID: profile.id, item: current, position: duration, duration: duration)
         let nextItem = hasNext ? items[index + 1] : nil
         downloads.episodeFinished(profile: profile, item: current, next: nextItem)
@@ -548,6 +698,7 @@ final class PlayerController: ObservableObject {
                 guard !Task.isCancelled, let self else { return }
                 self.player.pause()
                 self.vlc.pause()
+                self.saveProgress(force: true)
                 self.sleep = .off
                 self.finished = true
             }
@@ -555,17 +706,19 @@ final class PlayerController: ObservableObject {
     }
 
     func stop() {
-        saveProgress()
+        saveProgress(force: true)
         countdownTask?.cancel()
         sleepTask?.cancel()
-        vlcTimer?.invalidate()
-        vlcTimer = nil
+        resumeTask?.cancel()
+        ticker?.invalidate()
+        ticker = nil
         stopVLC()
         player.pause()
-        if let timeObserver { player.removeTimeObserver(timeObserver) }
-        timeObserver = nil
         cancellables.removeAll()
         itemCancellables.removeAll()
         player.replaceCurrentItem(with: nil)
+        let center = MPRemoteCommandCenter.shared()
+        [center.togglePlayPauseCommand, center.playCommand, center.pauseCommand, center.nextTrackCommand].forEach { $0.removeTarget(nil) }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 }

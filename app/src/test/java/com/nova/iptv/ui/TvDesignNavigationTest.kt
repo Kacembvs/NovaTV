@@ -47,6 +47,12 @@ class TvDesignNavigationTest {
     }
 
     @Test
+    fun everyInterfaceHasItsOwnDefaultColours() {
+        val accents = TvInterface.entries.map { NovaPalettes.of(it.defaultPalette).accent }
+        assertEquals(TvInterface.entries.size, accents.toSet().size)
+    }
+
+    @Test
     fun landscapePhoneScalesTheTvFrameToTheTvReferenceHeight() {
         shadowOf(compose.activity.getSystemService(UiModeManager::class.java))
             .setCurrentModeType(Configuration.UI_MODE_TYPE_NORMAL)

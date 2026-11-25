@@ -204,6 +204,7 @@ private fun TopBar(state: PlayerUiState, actions: PlayerActions, onFocusChanged:
                 modifier = Modifier.size(48.dp),
             )
         }
+        if (state.pipAvailable) BarButton(Icons.Rounded.PictureInPictureAlt, "Mini-lecteur", actions::enterPip)
         if (!state.isTv) BarButton(Icons.Rounded.Lock, "Verrouiller l'écran", actions::toggleLock)
         BarButton(Icons.AutoMirrored.Rounded.OpenInNew, "Lecteur externe", actions::openExternal)
     }

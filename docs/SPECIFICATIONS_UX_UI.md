@@ -83,9 +83,9 @@ catégorie réellement filtrée, sans catalogue fictif.
 Le passage d'un style à l'autre doit conserver la destination et la section de
 réglages ouverte. Le choix est mémorisé et sauvegardé ; les anciennes sauvegardes
 restent compatibles. La restauration conserve la palette sauvegardée, même si
-elle diffère de celle du style. Les palettes par défaut sont Stream Red pour
-Cinéma, Cinema Gold pour Antenne, NOVA+ Noir et blanc pour NOVA+ et NOVA Blue
-pour les autres interfaces.
+elle diffère de celle du style. Chaque interface a sa palette par défaut : NOVA Blue
+(Classique), Stream Red (Cinéma), Univers Indigo (Univers), Cinema Gold (Antenne),
+Horizon Océan (Horizon), Guide Émeraude (Guide) et NOVA+ Noir et blanc (NOVA+).
 En portrait, le mobile conserve sa disposition. En paysage, téléphones et tablettes
 affichent l'interface TV choisie, réduite proportionnellement si l'écran fait moins
 de 480 dp de haut, et utilisable au toucher. Les comportements propres à la

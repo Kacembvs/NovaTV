@@ -46,6 +46,8 @@ data class PlayerUiState(
     val topBarFocusRequest: Int = 0,
     /** Mobile Picture-in-Picture window: only the video is drawn. */
     val inPip: Boolean = false,
+    /** Phone/tablet with PiP allowed: shows the "Mini-lecteur" button. */
+    val pipAvailable: Boolean = false,
     /** Google Cast: button shown when available (phones), device name while casting. */
     val castAvailable: Boolean = false,
     val castDevice: String? = null,
@@ -77,6 +79,7 @@ interface PlayerActions {
     fun selectQuality(option: TrackOption?)
     fun setSpeed(speed: Float)
     fun toggleLock()
+    fun enterPip()
     fun showControls()
     fun seekBy(deltaMs: Long)
     fun adjustBrightness(delta: Float)

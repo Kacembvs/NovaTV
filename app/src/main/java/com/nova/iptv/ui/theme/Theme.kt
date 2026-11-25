@@ -26,6 +26,9 @@ enum class NovaThemeId(val label: String) {
     PURE_LIGHT("Pure Light"),
     CUSTOM("Personnalisé"),
     MONOCHROME("NOVA+ Noir et blanc"),
+    UNIVERSE_INDIGO("Univers Indigo"),
+    HORIZON_OCEAN("Horizon Océan"),
+    GUIDE_EMERALD("Guide Émeraude"),
 }
 
 data class NovaPalette(
@@ -111,6 +114,42 @@ object NovaPalettes {
             border = Color(0xFFCCD5E3),
             error = Color(0xFFD32F45),
             isLight = true,
+        )
+        NovaThemeId.UNIVERSE_INDIGO -> NovaPalette(
+            background = Color(0xFF070718),
+            background2 = Color(0xFF11112E),
+            card = Color(0xFF1C1B45),
+            accent = Color(0xFFA78BFF),
+            accent2 = Color(0xFF6C4DF5),
+            accentStrong = Color(0xFF7B5CFF),
+            textPrimary = Color.White,
+            textSecondary = Color(0xFFB4AFD6),
+            border = Color(0xFF2E2B66),
+            error = Color(0xFFFF6B7A),
+        )
+        NovaThemeId.HORIZON_OCEAN -> NovaPalette(
+            background = Color(0xFF0F171E),
+            background2 = Color(0xFF16222C),
+            card = Color(0xFF1F2E3B),
+            accent = Color(0xFF00A8E1),
+            accent2 = Color(0xFF7FD9FF),
+            accentStrong = Color(0xFF0090C8),
+            textPrimary = Color.White,
+            textSecondary = Color(0xFF9FB3C4),
+            border = Color(0xFF2C3F50),
+            error = Color(0xFFFF6B7A),
+        )
+        NovaThemeId.GUIDE_EMERALD -> NovaPalette(
+            background = Color(0xFF0B100E),
+            background2 = Color(0xFF131A17),
+            card = Color(0xFF1C2622),
+            accent = Color(0xFF2ED47A),
+            accent2 = Color(0xFF8BE8B5),
+            accentStrong = Color(0xFF1FB866),
+            textPrimary = Color.White,
+            textSecondary = Color(0xFFA3B8AD),
+            border = Color(0xFF2A3A33),
+            error = Color(0xFFFF6B7A),
         )
         NovaThemeId.CUSTOM -> {
             val accent = Color(customAccent ?: CUSTOM_ACCENTS.first())

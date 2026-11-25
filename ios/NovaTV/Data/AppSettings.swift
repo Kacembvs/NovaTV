@@ -29,7 +29,8 @@ enum PlayerChoice: String, CaseIterable, Identifiable {
 /// Same identifiers as Android (`NovaThemeId`), so backups move between devices.
 enum PaletteID: String, CaseIterable, Identifiable {
     case novaBlue = "NOVA_BLUE", cinemaGold = "CINEMA_GOLD", streamRed = "STREAM_RED", pureLight = "PURE_LIGHT",
-         custom = "CUSTOM", monochrome = "MONOCHROME"
+         custom = "CUSTOM", monochrome = "MONOCHROME", universeIndigo = "UNIVERSE_INDIGO", horizonOcean = "HORIZON_OCEAN",
+         guideEmerald = "GUIDE_EMERALD"
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -39,6 +40,9 @@ enum PaletteID: String, CaseIterable, Identifiable {
         case .pureLight: return "Pure Light"
         case .custom: return "Personnalisé"
         case .monochrome: return "NOVA+ Noir et blanc"
+        case .universeIndigo: return "Univers Indigo"
+        case .horizonOcean: return "Horizon Océan"
+        case .guideEmerald: return "Guide Émeraude"
         }
     }
 }
@@ -88,10 +92,13 @@ enum NovaStyle: String, CaseIterable, Identifiable {
 
     var defaultPalette: PaletteID {
         switch self {
+        case .classic: return .novaBlue
         case .cinema: return .streamRed
+        case .studios: return .universeIndigo
         case .antenna: return .cinemaGold
+        case .discovery: return .horizonOcean
+        case .guide: return .guideEmerald
         case .plus: return .monochrome
-        default: return .novaBlue
         }
     }
 
@@ -301,6 +308,15 @@ struct Palette: Equatable {
         case .pureLight:
             return Palette(id: id, background: 0xF5F7FB, background2: 0xFFFFFF, card: 0xE9EEF6, accent: 0x0A72D9, accent2: 0x6A3FE0,
                            text: 0x0E1525, textSecondary: 0x55627A, border: 0xCCD5E3, error: 0xD32F45, isLight: true)
+        case .universeIndigo:
+            return Palette(id: id, background: 0x070718, background2: 0x11112E, card: 0x1C1B45, accent: 0x7B5CFF, accent2: 0xA78BFF,
+                           text: 0xFFFFFF, textSecondary: 0xB4AFD6, border: 0x2E2B66, error: 0xFF6B7A)
+        case .horizonOcean:
+            return Palette(id: id, background: 0x0F171E, background2: 0x16222C, card: 0x1F2E3B, accent: 0x0090C8, accent2: 0x7FD9FF,
+                           text: 0xFFFFFF, textSecondary: 0x9FB3C4, border: 0x2C3F50, error: 0xFF6B7A)
+        case .guideEmerald:
+            return Palette(id: id, background: 0x0B100E, background2: 0x131A17, card: 0x1C2622, accent: 0x1FB866, accent2: 0x8BE8B5,
+                           text: 0xFFFFFF, textSecondary: 0xA3B8AD, border: 0x2A3A33, error: 0xFF6B7A)
         case .custom:
             return Palette(id: id, background: 0x080D18, background2: 0x101829, card: 0x172238, accent: customAccent, accent2: 0x8257FF,
                            text: 0xFFFFFF, textSecondary: 0xA5B1C5, border: 0x27344A, error: 0xFF6B7A)

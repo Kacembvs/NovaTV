@@ -147,6 +147,7 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
                 countdownSeconds = it.countdownSeconds
                 ui.update { state -> state.copy(gesturesEnabled = it.gesturesEnabled) }
                 pipEnabled = it.pictureInPicture
+                ui.update { state -> state.copy(pipAvailable = pipSupported()) }
                 updatePipParams()
                 requestedOrientation = if (it.freeRotation) {
                     ActivityInfo.SCREEN_ORIENTATION_FULL_USER
@@ -495,22 +496,42 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
             Rational(16, 9)
         }
         val playing = exo?.isPlaying == true
-        val action = RemoteAction(
-            Icon.createWithResource(this, if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play),
-            if (playing) "Pause" else "Lecture",
-            if (playing) "Pause" else "Lecture",
+        fun action(command: Int, icon: Int, label: String) = RemoteAction(
+            Icon.createWithResource(this, icon),
+            label,
+            label,
             PendingIntent.getBroadcast(
                 this,
-                0,
-                Intent(ACTION_PIP_TOGGLE).setPackage(packageName),
+                command,
+                Intent(ACTION_PIP_TOGGLE).setPackage(packageName).putExtra(EXTRA_PIP_COMMAND, command),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             ),
         )
+        val playPause = action(
+            PIP_PLAY_PAUSE,
+            if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+            if (playing) "Pause" else "Lecture",
+        )
+        val actions = if (ui.value.isLive) {
+            listOfNotNull(playPause, action(PIP_NEXT, android.R.drawable.ic_media_next, "Chaîne suivante").takeIf { ui.value.canZap })
+        } else {
+            listOf(
+                action(PIP_REWIND, android.R.drawable.ic_media_rew, "Reculer de 10 secondes"),
+                playPause,
+                action(PIP_FORWARD, android.R.drawable.ic_media_ff, "Avancer de 10 secondes"),
+            )
+        }
         return PictureInPictureParams.Builder()
             .setAspectRatio(ratio)
-            .setActions(listOf(action))
+            .setActions(actions.take(maxNumPictureInPictureActions.coerceAtLeast(1)))
             .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setAutoEnterEnabled(canEnterPip()) }
             .build()
+    }
+
+    override fun enterPip() {
+        if (!pipSupported() || ui.value.error != null) return
+        ui.update { it.copy(panel = null) }
+        runCatching { enterPictureInPictureMode(pipParams()) }
     }
 
     private fun updatePipParams() {
@@ -536,13 +557,21 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
         playerView?.useController = !isInPictureInPictureMode && !ui.value.locked
         if (isInPictureInPictureMode) playerView?.hideController()
         ui.update { it.copy(inPip = isInPictureInPictureMode, panel = null) }
+        // Closing the mini-player (×) stops the activity without returning to full screen.
+        if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) finish()
     }
 
     private fun registerPipReceiver() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val p = exo ?: return
-                if (p.isPlaying) p.pause() else p.play()
+                when (intent.getIntExtra(EXTRA_PIP_COMMAND, PIP_PLAY_PAUSE)) {
+                    PIP_REWIND -> seekBy(-10_000)
+                    PIP_FORWARD -> seekBy(10_000)
+                    PIP_NEXT -> zapNext()
+                    else -> if (p.isPlaying) p.pause() else p.play()
+                }
+                updatePipParams()
             }
         }
         ContextCompat.registerReceiver(this, receiver, IntentFilter(ACTION_PIP_TOGGLE), ContextCompat.RECEIVER_NOT_EXPORTED)
@@ -1079,6 +1108,11 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
         const val TV_CONTROLLER_TIMEOUT_MS = 7_000
         const val MAX_LIVE_RETRIES = 3
         const val ACTION_PIP_TOGGLE = "com.nova.iptv.PIP_TOGGLE"
+        private const val EXTRA_PIP_COMMAND = "command"
+        private const val PIP_PLAY_PAUSE = 0
+        private const val PIP_REWIND = 1
+        private const val PIP_FORWARD = 2
+        private const val PIP_NEXT = 3
         val HIDDEN_COMMANDS = intArrayOf(Player.COMMAND_SET_SPEED_AND_PITCH, Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS)
     }
 }

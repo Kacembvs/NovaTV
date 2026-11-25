@@ -165,8 +165,9 @@ s'ajoutent à **NOVA Classique**, conservée par défaut pour permettre un retou
 Les fiches, cartes de recherche, sections de réglages et panneaux du lecteur
 s'adaptent également au style. Les collections d'Univers ouvrent le bon catalogue,
 filtré sur leur catégorie. Choisir une interface applique aussi sa palette par
-défaut : noir/rouge pour Cinéma, noir/or pour Antenne, noir/blanc pour NOVA+ et
-NOVA Blue pour les autres.
+défaut, différente pour chaque interface : NOVA Blue pour Classique, noir/rouge
+pour Cinéma, indigo pour Univers, noir/or pour Antenne, océan pour Horizon,
+émeraude pour Guide et noir/blanc pour NOVA+ (identiques sur Android et iPhone).
 La palette peut ensuite être personnalisée sans changer la disposition ;
 resélectionner une interface réapplique ses couleurs par défaut. Le choix est
 persistant et inclus dans les sauvegardes, qui conservent les couleurs personnalisées.
@@ -215,12 +216,18 @@ avec programme en cours/suivant, films, séries et saisons, recherche, Ma liste,
 reprise de lecture, guide TV, téléchargements hors ligne, thèmes NOVA et contrôle
 parental.
 
-- **Lecteur** : lecteur Apple (Picture-in-Picture, AirPlay, pistes audio/sous-titres,
-  vitesse, écran de verrouillage) et **moteur VLC intégré** (MobileVLCKit 3.6) pour
-  MKV, AVI, TS, WMV… avec commandes NOVA (±10 s, double appui, pistes, vitesse).
-  Bascule automatique vers VLC si le lecteur Apple échoue ; bascule manuelle dans « … ».
+- **Lecteur** : mêmes commandes NOVA qu'Android pour les deux moteurs — lecteur Apple
+  (AirPlay) et **moteur VLC intégré** (MobileVLCKit 3.6) pour MKV, AVI, TS, WMV… :
+  barre haute (audio, sous-titres, vitesse, minuteur, mini-lecteur, verrouillage, options),
+  panneau « Options de lecture » (langue audio, sous-titres, vitesse, format d'image,
+  moteur, informations techniques, lecteur externe), ±10 s et double appui, glissement
+  vertical à gauche = luminosité, à droite = volume (avec indicateur).
+  Bascule automatique vers VLC si le lecteur Apple échoue.
   Reprise, épisode suivant automatique, zapping, minuteur de sommeil, langues préférées.
   « Ouvrir avec » VLC, Outplayer ou Infuse, et lecteur par défaut au choix.
+- **Mini-lecteur** (Picture-in-Picture, lecteur Apple) : automatique en quittant l'app,
+  ou bouton « Mini-lecteur » pour continuer à naviguer dans NOVA ; la fenêtre se déplace,
+  se redimensionne et se range sur le bord de l'écran ; toucher pour revenir en plein écran.
 - **Réglages** : mêmes sections qu'Android (Profils, Lecture, Téléchargements, Langues,
   Apparence, Contrôle parental, Sauvegarde) ; barre latérale en paysage et sur iPad.
   Les sept interfaces NOVA (NOVA+, Cinéma…) appliquent couleurs et angles (droits sur
@@ -296,7 +303,7 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Bannière d'accueil (recommandés / nouveautés / sélection aléatoire), rotation lente | Fait |
 | TV en direct en 3 zones (catégories, chaînes, aperçu vidéo + programme) sur TV et grand écran | Fait |
 | Thèmes NOVA Blue, Cinema Gold, Stream Red, Pure Light, Personnalisé (accent) — changement immédiat | Fait |
-| Picture-in-Picture mobile (auto Android 12+, bouton lecture/pause), désactivable | Fait |
+| Mini-lecteur mobile (Picture-in-Picture) : auto en quittant l'app (Android 12+, bouton Accueil sinon), bouton « Mini-lecteur », commandes −10 s / lecture-pause / +10 s (chaîne suivante en direct), fenêtre déplaçable, désactivable | Fait |
 | Sauvegarde/restauration JSON : profils, favoris, j'aime, reprises, réglages ; mots de passe chiffrés par code (PBKDF2 + AES-GCM) | Fait |
 | Contrôle parental : code PIN haché (PBKDF2), catégories des catalogues masquées, réglages protégés | Partiel : accueil, guide et certaines reprises non couverts |
 | Langues audio / sous-titres préférées (réglages + mémorisation du choix fait dans le lecteur) | Fait |

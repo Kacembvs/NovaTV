@@ -1,39 +1,189 @@
 import AVKit
-import SwiftUI
+import MediaPlayer
 import SwiftData
+import SwiftUI
 import VLCKitSPM
 
-struct SystemPlayerView: UIViewControllerRepresentable {
-    @ObservedObject var controller: PlayerController
+// MARK: Video surfaces
 
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let vc = AVPlayerViewController()
-        vc.player = controller.player
-        vc.allowsPictureInPicturePlayback = controller.pictureInPicture
-        vc.canStartPictureInPictureAutomaticallyFromInline = controller.pictureInPicture
-        vc.updatesNowPlayingInfoCenter = true
-        vc.showsPlaybackControls = true
-        vc.videoGravity = .resizeAspect
-        return vc
-    }
-
-    func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
-        if vc.player !== controller.player { vc.player = controller.player }
-    }
+/// Apple engine surface: a bare AVPlayerLayer, so NOVA draws the same controls as on Android.
+final class PlayerLayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
-/// Surface the built-in VLC engine draws into.
-struct VLCVideoView: UIViewRepresentable {
+struct AppleVideoView: UIViewRepresentable {
     let controller: PlayerController
+    let request: PlaybackRequest
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+    func makeUIView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView()
         view.backgroundColor = .black
-        controller.attachVLCView(view)
+        view.playerLayer.player = controller.player
+        controller.playerLayer = view.playerLayer
+        controller.applyFit()
+        PictureInPicture.shared.attach(layer: view.playerLayer, controller: controller, request: request)
         return view
     }
 
-    func updateUIView(_ view: UIView, context: Context) {}
+    func updateUIView(_ view: PlayerLayerView, context: Context) {
+        if view.playerLayer.player !== controller.player { view.playerLayer.player = controller.player }
+    }
+}
+
+/// Floating mini-player. iOS lets the user drag it anywhere, resize it and tuck it against an edge.
+/// Started from the player button, it closes the full-screen player so the user can keep browsing NOVA;
+/// started by leaving the app, it simply keeps the video on the home screen.
+@MainActor
+final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
+    static let shared = PictureInPicture()
+
+    private(set) var pip: AVPictureInPictureController?
+    /// Kept alive while the full-screen player is closed and the video plays in the mini-player.
+    private(set) var activeController: PlayerController?
+    private(set) var activeRequest: PlaybackRequest?
+    private var restoring = false
+    var onDismissPlayer: (() -> Void)?
+    var onRestorePlayer: ((PlaybackRequest) -> Void)?
+
+    var isActive: Bool { pip?.isPictureInPictureActive == true }
+
+    func attach(layer: AVPlayerLayer, controller: PlayerController, request: PlaybackRequest) {
+        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        if pip?.playerLayer !== layer {
+            pip?.delegate = nil
+            pip = AVPictureInPictureController(playerLayer: layer)
+            pip?.delegate = self
+        }
+        pip?.canStartPictureInPictureAutomaticallyFromInline = controller.pictureInPictureAllowed
+        activeController = controller
+        activeRequest = request
+        restoring = false
+    }
+
+    func start() {
+        guard let pip, pip.isPictureInPicturePossible else { return }
+        pip.startPictureInPicture()
+    }
+
+    /// The built-in VLC engine has no system mini-player.
+    func disableAutomatic() { pip?.canStartPictureInPictureAutomaticallyFromInline = false }
+
+    /// Same controller when the full-screen player reopens from the mini-player.
+    func reusableController(for request: PlaybackRequest) -> PlayerController? {
+        activeRequest?.id == request.id ? activeController : nil
+    }
+
+    /// Owns the controller only while the mini-player shows it.
+    func owns(_ controller: PlayerController) -> Bool { isActive && activeController === controller }
+
+    /// A new video replaces the one in the mini-player.
+    func closeOther(than controller: PlayerController) {
+        guard let current = activeController, current !== controller else { return }
+        if isActive { pip?.stopPictureInPicture() }
+        current.stop()
+        activeController = nil
+        activeRequest = nil
+    }
+
+    nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        Task { @MainActor in
+            if UIApplication.shared.applicationState == .active { self.onDismissPlayer?() }
+        }
+    }
+
+    nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController,
+                                                restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        Task { @MainActor in
+            self.restoring = true
+            if let request = self.activeRequest { self.onRestorePlayer?(request) }
+            completionHandler(true)
+        }
+    }
+
+    nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
+        Task { @MainActor in
+            defer { self.restoring = false }
+            // Closed with ×: stop the video unless the full-screen player is showing it again.
+            guard !self.restoring, let player = self.activeController, !player.isPresented else { return }
+            player.stop()
+            self.activeController = nil
+            self.activeRequest = nil
+        }
+    }
+
+    nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController,
+                                                failedToStartPictureInPictureWithError error: Error) {}
+}
+
+final class VLCSurfaceView: UIView {
+    var onResize: ((CGSize) -> Void)?
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onResize?(bounds.size)
+    }
+}
+
+struct VLCVideoView: UIViewRepresentable {
+    let controller: PlayerController
+
+    func makeUIView(context: Context) -> VLCSurfaceView {
+        let view = VLCSurfaceView()
+        view.backgroundColor = .black
+        view.onResize = { [weak controller] size in
+            Task { @MainActor in
+                guard let controller, controller.surfaceSize != size else { return }
+                controller.surfaceSize = size
+                controller.applyFit()
+            }
+        }
+        controller.attachVLCView(view)
+        PictureInPicture.shared.disableAutomatic()
+        return view
+    }
+
+    func updateUIView(_ view: VLCSurfaceView, context: Context) {}
+}
+
+// MARK: Brightness and volume
+
+/// iOS only allows changing the system volume through MPVolumeView's slider; the hidden view
+/// also replaces the system volume popup while the player is open.
+@MainActor
+enum SystemVolume {
+    static weak var view: MPVolumeView?
+
+    static var value: Float { AVAudioSession.sharedInstance().outputVolume }
+
+    static func set(_ value: Float) {
+        guard let slider = view?.subviews.compactMap({ $0 as? UISlider }).first else { return }
+        slider.setValue(max(0, min(1, value)), animated: false)
+        slider.sendActions(for: .valueChanged)
+    }
+}
+
+struct VolumeBridge: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView(frame: CGRect(x: -100, y: -100, width: 10, height: 10))
+        view.alpha = 0.01
+        SystemVolume.view = view
+        return view
+    }
+
+    func updateUIView(_ view: MPVolumeView, context: Context) {}
+}
+
+@MainActor
+enum ScreenBrightness {
+    static var screen: UIScreen? { (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen }
+    static var value: CGFloat { screen?.brightness ?? 0.5 }
+    static func set(_ value: CGFloat) { screen?.brightness = max(0, min(1, value)) }
+}
+
+// MARK: Player screen
+
+enum PlayerPanel: Equatable {
+    case options, audio, subtitles, speed, fit, sleep, info, external
 }
 
 struct PlayerScreen: View {
@@ -41,44 +191,244 @@ struct PlayerScreen: View {
     let profile: Profile
     @StateObject private var controller: PlayerController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.palette) private var appPalette
     private let freeRotation: Bool
+
+    @State private var controlsVisible = true
+    @State private var hideTask: Task<Void, Never>?
+    @State private var panel: PlayerPanel?
+    @State private var locked = false
+    @State private var scrubbing: Double?
+    @State private var flash: String?
+    @State private var gesture: GestureFeedback?
+    @State private var dragStart: (side: GestureFeedback.Kind, value: Double)?
+    @State private var originalBrightness: CGFloat?
+
+    struct GestureFeedback: Equatable {
+        enum Kind { case brightness, volume }
+        var kind: Kind
+        var value: Double
+    }
 
     init(request: PlaybackRequest, profile: Profile, context: ModelContext, settings: AppSettings, downloads: DownloadCenter) {
         self.request = request
         self.profile = profile
         freeRotation = settings.freeRotation
-        _controller = StateObject(wrappedValue: PlayerController(request: request, profile: profile, context: context, settings: settings, downloads: downloads))
+        _controller = StateObject(wrappedValue: PictureInPicture.shared.reusableController(for: request)
+            ?? PlayerController(request: request, profile: profile, context: context, settings: settings, downloads: downloads))
     }
+
+    /// The player keeps a dark, readable look even with the light palette (as on Android).
+    private var palette: Palette { appPalette.isLight ? Palette.of(.monochrome) : appPalette }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if controller.engine == .apple {
-                SystemPlayerView(controller: controller).ignoresSafeArea()
-                VStack {
-                    PlayerTopBar(controller: controller, onClose: close)
-                    Spacer()
-                }
-            } else {
-                VLCPlayerLayer(controller: controller, onClose: close)
-            }
-            if let message = controller.error {
-                PlayerErrorView(message: message, controller: controller, onClose: close)
-            }
-            if let left = controller.nextCountdown, controller.hasNext {
-                NextUpView(title: controller.items[controller.index + 1].subtitle ?? controller.items[controller.index + 1].title,
-                           seconds: left, onPlay: { controller.next() }, onCancel: { controller.cancelCountdown() })
-            }
+            videoSurface
+            VolumeBridge().frame(width: 1, height: 1).allowsHitTesting(false)
+            gestureLayer
+            feedbackLayer
+            controlsLayer
+            panelLayer
+            statusLayer
         }
+        .environment(\.palette, palette)
         .environment(\.colorScheme, .dark)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
-        .onAppear {
-            OrientationLock.set(freeRotation ? .allButUpsideDown : .landscape, preferred: .landscapeRight)
+        .animation(.easeInOut(duration: 0.2), value: controlsVisible)
+        .animation(.easeInOut(duration: 0.2), value: panel)
+        .onAppear(perform: appeared)
+        .onDisappear(perform: disappeared)
+    }
+
+    private var videoSurface: some View {
+        Group {
+            if controller.engine == .apple {
+                AppleVideoView(controller: controller, request: request)
+            } else {
+                VLCVideoView(controller: controller)
+            }
         }
-        .onDisappear {
-            controller.stop()
-            OrientationLock.set(.all, preferred: .portrait)
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var feedbackLayer: some View {
+        if controller.buffering && controller.error == nil && !controller.finished {
+            ProgressView().tint(.white).scaleEffect(1.6).allowsHitTesting(false)
+        }
+        if let flash {
+            Text(flash).font(.title2.bold()).foregroundStyle(.white)
+                .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+                .allowsHitTesting(false)
+        }
+        if let gesture { GestureIndicator(feedback: gesture) }
+    }
+
+    @ViewBuilder
+    private var controlsLayer: some View {
+        if locked {
+            lockedOverlay
+        } else if controlsVisible && panel == nil {
+            PlayerControls(controller: controller, scrubbing: $scrubbing, onClose: close, onPanel: open,
+                           onLock: lock, onInteraction: scheduleHide)
+                .transition(.opacity)
+        }
+        if let from = controller.resumedFrom, !locked {
+            ResumeBanner(position: from) { controller.restartFromBeginning() }
+        }
+    }
+
+    @ViewBuilder
+    private var panelLayer: some View {
+        if let panel {
+            PlayerPanelView(panel: panel, controller: controller, onSelect: open, onClose: closePanel, onExternal: openExternal)
+        }
+    }
+
+    @ViewBuilder
+    private var statusLayer: some View {
+        if let message = controller.error {
+            PlayerErrorView(message: message, controller: controller, onClose: close, onExternal: { open(.external) })
+        } else if let left = controller.nextCountdown, controller.hasNext {
+            let next = controller.items[controller.index + 1]
+            NextUpView(title: next.subtitle ?? next.title, seconds: left,
+                       onPlay: { controller.next() }, onCancel: { controller.cancelCountdown() })
+        } else if controller.finished {
+            EndScreen(controller: controller, onClose: close)
+        }
+    }
+
+    private func appeared() {
+        controller.isPresented = true
+        PictureInPicture.shared.closeOther(than: controller)
+        OrientationLock.set(freeRotation ? .allButUpsideDown : .landscape, preferred: .landscapeRight)
+        originalBrightness = ScreenBrightness.value
+        scheduleHide()
+    }
+
+    private func disappeared() {
+        controller.isPresented = false
+        // Still playing in the mini-player: keep the video running.
+        if !PictureInPicture.shared.owns(controller) { controller.stop() }
+        if let originalBrightness { ScreenBrightness.set(originalBrightness) }
+        OrientationLock.set(.all, preferred: .portrait)
+    }
+
+    private func lock() {
+        locked = true
+        controlsVisible = false
+    }
+
+    private func closePanel() {
+        panel = nil
+        showControls()
+    }
+
+    // MARK: Gestures
+
+    private var gestureLayer: some View {
+        GeometryReader { geo in
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { location in
+                    guard !locked, controller.gesturesEnabled, !controller.isLive else { return }
+                    let forward = location.x > geo.size.width / 2
+                    controller.skip(forward ? 10 : -10)
+                    show(flash: forward ? "+10 s" : "−10 s")
+                }
+                .onTapGesture {
+                    if locked { controlsVisible.toggle(); scheduleHide() } else if panel != nil { panel = nil } else { toggleControls() }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 12)
+                        .onChanged { value in
+                            guard !locked, controller.gesturesEnabled,
+                                  abs(value.translation.height) > abs(value.translation.width) else { return }
+                            if dragStart == nil {
+                                let left = value.startLocation.x < geo.size.width / 2
+                                dragStart = left ? (.brightness, Double(ScreenBrightness.value)) : (.volume, Double(SystemVolume.value))
+                            }
+                            guard let start = dragStart else { return }
+                            let delta = -value.translation.height / max(200, geo.size.height * 0.8)
+                            let level = max(0, min(1, start.value + delta))
+                            if start.side == .brightness { ScreenBrightness.set(level) } else { SystemVolume.set(Float(level)) }
+                            gesture = GestureFeedback(kind: start.side, value: level)
+                        }
+                        .onEnded { _ in
+                            dragStart = nil
+                            Task {
+                                try? await Task.sleep(nanoseconds: 700_000_000)
+                                if dragStart == nil { gesture = nil }
+                            }
+                        }
+                )
+        }
+        .ignoresSafeArea()
+    }
+
+    private var lockedOverlay: some View {
+        VStack {
+            Spacer()
+            HStack {
+                if controlsVisible {
+                    Button {
+                        locked = false
+                        showControls()
+                    } label: {
+                        Label("Déverrouiller", systemImage: "lock.open.fill")
+                            .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 16).padding(.vertical, 12)
+                            .background(.black.opacity(0.6), in: Capsule())
+                    }
+                    .transition(.opacity)
+                }
+                Spacer()
+            }
+            .padding(24)
+        }
+    }
+
+    // MARK: Helpers
+
+    private func open(_ target: PlayerPanel) {
+        panel = target
+        hideTask?.cancel()
+    }
+
+    private func openExternal(_ player: ExternalPlayer) {
+        guard let url = controller.streamURL else { return }
+        controller.stop()
+        player.open(url)
+        dismiss()
+    }
+
+    private func toggleControls() {
+        controlsVisible.toggle()
+        if controlsVisible { scheduleHide() }
+    }
+
+    private func showControls() {
+        controlsVisible = true
+        scheduleHide()
+    }
+
+    private func scheduleHide() {
+        hideTask?.cancel()
+        hideTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled, controller.playing, scrubbing == nil, panel == nil else { return }
+            controlsVisible = false
+        }
+    }
+
+    private func show(flash text: String) {
+        flash = text
+        Task {
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            if flash == text { flash = nil }
         }
     }
 
@@ -88,259 +438,424 @@ struct PlayerScreen: View {
     }
 }
 
-/// Close, title and options shared by both engines.
-private struct PlayerTopBar: View {
+// MARK: Controls
+
+private struct PlayerControls: View {
     @ObservedObject var controller: PlayerController
+    @Binding var scrubbing: Double?
     let onClose: () -> Void
+    let onPanel: (PlayerPanel) -> Void
+    let onLock: () -> Void
+    let onInteraction: () -> Void
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 12) {
-            PlayerChromeButton(systemImage: "xmark", label: "Fermer", action: onClose)
-            Text(controller.title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .shadow(radius: 4)
-            Spacer()
-            if controller.index > 0 && controller.isLive {
-                PlayerChromeButton(systemImage: "chevron.left", label: "Chaîne précédente") { controller.previous() }
+        ZStack {
+            LinearGradient(colors: [.black.opacity(0.7), .clear, .clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            VStack(spacing: 0) {
+                topBar
+                Spacer()
+                transport
+                Spacer()
+                bottomBar
             }
-            if controller.hasNext {
-                PlayerChromeButton(systemImage: controller.isLive ? "chevron.right" : "forward.end.fill",
-                                   label: controller.isLive ? "Chaîne suivante" : "Suivant") { controller.next() }
-            }
-            PlayerOptionsMenu(controller: controller, onClose: onClose)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
     }
-}
 
-private struct PlayerOptionsMenu: View {
-    @ObservedObject var controller: PlayerController
-    let onClose: () -> Void
-
-    var body: some View {
-        Menu {
-            if controller.engine == .vlc {
-                if !controller.audioTracks.isEmpty {
-                    Section("Audio") {
-                        ForEach(controller.audioTracks.filter { $0.id >= 0 }) { track in
-                            Button { controller.selectAudio(track) } label: {
-                                check(track.name, controller.currentAudio == track.id)
-                            }
-                        }
-                    }
-                }
-                Section("Sous-titres") {
-                    Button { controller.selectSubtitle(nil) } label: { check("Désactivés", controller.currentSubtitle < 0) }
-                    ForEach(controller.subtitleTracks.filter { $0.id >= 0 }) { track in
-                        Button { controller.selectSubtitle(track) } label: { check(track.name, controller.currentSubtitle == track.id) }
-                    }
-                }
-                if !controller.isLive {
-                    Section("Vitesse") {
-                        ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { value in
-                            Button { controller.setRate(Float(value)) } label: {
-                                check(value == 1 ? "Normale" : "×\(value.formatted())", abs(Double(controller.rate) - value) < 0.01)
-                            }
-                        }
-                    }
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            BarButton(icon: "chevron.backward", label: "Retour", action: onClose)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(controller.current.title).font(.headline).foregroundStyle(.white).lineLimit(1)
+                if let subtitle = controller.current.subtitle {
+                    Text(subtitle).font(.caption).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
                 }
             }
-            Section("Minuteur de sommeil") {
-                Button { controller.setSleep(.off) } label: { check("Désactivé", controller.sleep == .off) }
-                ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
-                    Button { controller.setSleep(.minutes(minutes)) } label: { check("\(minutes) minutes", controller.sleep == .minutes(minutes)) }
-                }
-                if !controller.isLive {
-                    Button { controller.setSleep(.endOfItem) } label: {
-                        check(controller.current.kind == .movie ? "Fin du film" : "Fin de l'épisode", controller.sleep == .endOfItem)
-                    }
-                }
+            if controller.isLive {
+                Text("EN DIRECT").font(.caption2.bold()).foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color.red, in: RoundedRectangle(cornerRadius: 4))
             }
-            Section("Moteur de lecture") {
-                Button { controller.switchEngine() } label: {
-                    Label(controller.engine == .apple ? "Passer au moteur VLC intégré" : "Passer au lecteur Apple",
-                          systemImage: "arrow.triangle.2.circlepath")
-                }
-            }
-            if let url = controller.streamURL {
-                Section("Ouvrir avec") {
-                    ForEach(ExternalPlayer.allCases) { player in
-                        Button(player.name) {
-                            controller.stop()
-                            player.open(url)
-                            onClose()
-                        }
-                    }
-                }
-            }
-        } label: {
-            PlayerChromeIcon(systemImage: controller.sleep == .off ? "ellipsis" : "moon.zzz.fill")
+            Spacer(minLength: 8)
+            actionButtons
         }
-        .accessibilityLabel("Options de lecture")
     }
 
     @ViewBuilder
-    private func check(_ title: String, _ selected: Bool) -> some View {
-        if selected { Label(title, systemImage: "checkmark") } else { Text(title) }
+    private var actionButtons: some View {
+            if controller.audioTracks.count > 1 { BarButton(icon: "waveform", label: "Audio") { onPanel(.audio) } }
+            if !controller.subtitleTracks.isEmpty { BarButton(icon: "captions.bubble", label: "Sous-titres") { onPanel(.subtitles) } }
+            if !controller.isLive { BarButton(icon: "speedometer", label: "Vitesse") { onPanel(.speed) } }
+            BarButton(icon: controller.sleep == .off ? "moon" : "moon.zzz.fill", label: "Minuteur de sommeil",
+                      highlighted: controller.sleep != .off) { onPanel(.sleep) }
+            if controller.pictureInPictureAllowed && AVPictureInPictureController.isPictureInPictureSupported() {
+                BarButton(icon: "pip.enter", label: "Mini-lecteur") { PictureInPicture.shared.start() }
+            }
+            AirPlayButton().frame(width: 44, height: 44).background(.black.opacity(0.35), in: Circle())
+            BarButton(icon: "lock", label: "Verrouiller l'écran", action: onLock)
+            BarButton(icon: "gearshape", label: "Options de lecture") { onPanel(.options) }
+    }
+
+    private var transport: some View {
+        HStack(spacing: 40) {
+            if controller.isLive {
+                if controller.index > 0 { TransportButton(icon: "backward.end.fill", label: "Chaîne précédente") { controller.previous(); onInteraction() } }
+            } else {
+                TransportButton(icon: "gobackward.10", label: "Reculer de 10 secondes") { controller.skip(-10); onInteraction() }
+            }
+            TransportButton(icon: controller.playing ? "pause.fill" : "play.fill", label: controller.playing ? "Pause" : "Lecture", size: 36) {
+                controller.togglePlay()
+                onInteraction()
+            }
+            if controller.isLive {
+                if controller.hasNext { TransportButton(icon: "forward.end.fill", label: "Chaîne suivante") { controller.next(); onInteraction() } }
+            } else {
+                TransportButton(icon: "goforward.10", label: "Avancer de 10 secondes") { controller.skip(10); onInteraction() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var bottomBar: some View {
+        if !controller.isLive && controller.duration > 0 {
+            let position = scrubbing ?? min(1, controller.time / controller.duration)
+            VStack(spacing: 4) {
+                Slider(value: Binding(get: { position }, set: { scrubbing = $0; onInteraction() }), in: 0...1) { editing in
+                    if !editing, let value = scrubbing {
+                        controller.seek(toFraction: value)
+                        scrubbing = nil
+                    }
+                }
+                .tint(palette.accent)
+                HStack {
+                    Text((position * controller.duration).clock)
+                    Spacer()
+                    if controller.hasNext {
+                        Button { controller.next() } label: {
+                            Label(controller.items[controller.index + 1].kind == .episode ? "Épisode suivant" : "Suivant", systemImage: "forward.end")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        Spacer()
+                    }
+                    Text("−" + ((1 - position) * controller.duration).clock)
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.85))
+            }
+        } else {
+            HStack {
+                Text(controller.engine.label).font(.caption).foregroundStyle(.white.opacity(0.6))
+                Spacer()
+            }
+        }
     }
 }
 
-/// Built-in VLC engine with NOVA's own controls (MKV, AVI, raw TS…).
-private struct VLCPlayerLayer: View {
-    @ObservedObject var controller: PlayerController
-    let onClose: () -> Void
-    @State private var controlsVisible = true
-    @State private var hideTask: Task<Void, Never>?
-    @State private var scrubbing: Double?
-    @State private var feedback: String?
+private struct BarButton: View {
+    let icon: String
+    let label: String
+    var highlighted = false
+    let action: () -> Void
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        ZStack {
-            VLCVideoView(controller: controller)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-            GeometryReader { geo in
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { location in
-                        guard controller.gesturesEnabled, !controller.isLive else { return }
-                        let forward = location.x > geo.size.width / 2
-                        controller.skip(forward ? 10 : -10)
-                        flash(forward ? "+10 s" : "−10 s")
-                    }
-                    .onTapGesture { toggleControls() }
-            }
-            .ignoresSafeArea()
-            if controller.vlcBuffering && controller.error == nil {
-                ProgressView().tint(.white).scaleEffect(1.5)
-            }
-            if let feedback {
-                Text(feedback).font(.title2.bold()).foregroundStyle(.white)
-                    .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
-            }
-            if controlsVisible {
-                controls.transition(.opacity)
-            }
-        }
-        .onAppear { scheduleHide() }
-    }
-
-    private var controls: some View {
-        ZStack {
-            LinearGradient(colors: [.black.opacity(0.65), .clear, .clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-            VStack {
-                PlayerTopBar(controller: controller, onClose: onClose)
-                Spacer()
-                HStack(spacing: 44) {
-                    if !controller.isLive {
-                        transport("gobackward.10", "Reculer de 10 secondes") { controller.skip(-10) }
-                    }
-                    transport(controller.vlcPlaying ? "pause.fill" : "play.fill", controller.vlcPlaying ? "Pause" : "Lecture", size: 34) {
-                        controller.togglePlay()
-                    }
-                    if !controller.isLive {
-                        transport("goforward.10", "Avancer de 10 secondes") { controller.skip(10) }
-                    }
-                }
-                Spacer()
-                if !controller.isLive && controller.vlcDuration > 0 {
-                    let position = scrubbing ?? (controller.vlcTime / controller.vlcDuration)
-                    VStack(spacing: 4) {
-                        Slider(value: Binding(get: { position }, set: { scrubbing = $0; scheduleHide() }), in: 0...1) { editing in
-                            if !editing, let value = scrubbing {
-                                controller.seek(toFraction: value)
-                                scrubbing = nil
-                            }
-                        }
-                        .tint(.white)
-                        HStack {
-                            Text((position * controller.vlcDuration).clock)
-                            Spacer()
-                            Text("−" + ((1 - position) * controller.vlcDuration).clock)
-                        }
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.85))
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
-                } else if controller.isLive {
-                    HStack {
-                        Label("EN DIRECT", systemImage: "dot.radiowaves.left.and.right").font(.caption.bold()).foregroundStyle(.red)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 24).padding(.bottom, 20)
-                }
-            }
-        }
-    }
-
-    private func transport(_ icon: String, _ label: String, size: CGFloat = 26, action: @escaping () -> Void) -> some View {
-        Button {
-            action()
-            scheduleHide()
-        } label: {
-            Image(systemName: icon).font(.system(size: size, weight: .semibold)).foregroundStyle(.white)
-                .frame(width: size * 2.2, height: size * 2.2)
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(highlighted ? palette.accent2 : .white)
+                .frame(width: 44, height: 44)
                 .background(.black.opacity(0.35), in: Circle())
         }
         .accessibilityLabel(label)
     }
-
-    private func toggleControls() {
-        withAnimation(.easeInOut(duration: 0.2)) { controlsVisible.toggle() }
-        if controlsVisible { scheduleHide() }
-    }
-
-    private func scheduleHide() {
-        hideTask?.cancel()
-        hideTask = Task {
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            guard !Task.isCancelled, controller.vlcPlaying, scrubbing == nil else { return }
-            withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
-        }
-    }
-
-    private func flash(_ text: String) {
-        feedback = text
-        Task {
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            if feedback == text { feedback = nil }
-        }
-    }
 }
 
-private struct PlayerChromeIcon: View {
-    let systemImage: String
-    var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 44, height: 44)
-            .background(.black.opacity(0.45), in: Circle())
-    }
-}
-
-private struct PlayerChromeButton: View {
-    let systemImage: String
+private struct TransportButton: View {
+    let icon: String
     let label: String
+    var size: CGFloat = 26
     let action: () -> Void
+
     var body: some View {
-        Button(action: action) { PlayerChromeIcon(systemImage: systemImage) }
-            .accessibilityLabel(label)
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: size, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: size * 2.2, height: size * 2.2)
+                .background(.black.opacity(0.4), in: Circle())
+        }
+        .accessibilityLabel(label)
     }
 }
 
-/// Player panels keep a dark, readable look whatever the app palette.
-private struct PlayerPanelButton: View {
+private struct AirPlayButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.tintColor = .white
+        view.activeTintColor = .systemBlue
+        view.prioritizesVideoDevices = true
+        return view
+    }
+
+    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+}
+
+private struct GestureIndicator: View {
+    let feedback: PlayerScreen.GestureFeedback
+
+    var body: some View {
+        let icon: String = {
+            switch feedback.kind {
+            case .brightness: return feedback.value < 0.35 ? "sun.min.fill" : "sun.max.fill"
+            case .volume: return feedback.value == 0 ? "speaker.slash.fill" : (feedback.value < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.3.fill")
+            }
+        }()
+        HStack(spacing: 12) {
+            Image(systemName: icon).font(.title2).frame(width: 30)
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.25))
+                Capsule().fill(.white).frame(width: 160 * feedback.value)
+            }
+            .frame(width: 160, height: 6)
+            Text("\(Int(feedback.value * 100)) %").font(.subheadline.monospacedDigit()).frame(width: 48, alignment: .trailing)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 18).padding(.vertical, 14)
+        .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(feedback.kind == .brightness ? "Luminosité \(Int(feedback.value * 100)) %" : "Volume \(Int(feedback.value * 100)) %")
+        .allowsHitTesting(false)
+    }
+}
+
+private struct ResumeBanner: View {
+    let position: Double
+    let onRestart: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 12) {
+                Text("Reprise à \(position.clock)").font(.subheadline).foregroundStyle(.white)
+                Button("Recommencer", action: onRestart).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(.black.opacity(0.75), in: Capsule())
+            .padding(.bottom, 90)
+        }
+    }
+}
+
+// MARK: Panels (same organisation as Android)
+
+private struct PlayerPanelView: View {
+    let panel: PlayerPanel
+    @ObservedObject var controller: PlayerController
+    let onSelect: (PlayerPanel) -> Void
+    let onClose: () -> Void
+    let onExternal: (ExternalPlayer) -> Void
+    @Environment(\.palette) private var palette
+    @Environment(\.novaStyle) private var style
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.black.opacity(0.35).contentShape(Rectangle()).onTapGesture(perform: onClose)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    if panel != .options {
+                        Button { onSelect(.options) } label: { Image(systemName: "chevron.backward").font(.headline) }
+                            .foregroundStyle(.white)
+                            .accessibilityLabel("Options de lecture")
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.title3.bold()).foregroundStyle(.white)
+                        if let subtitle { Text(subtitle).font(.caption).foregroundStyle(palette.textSecondary) }
+                    }
+                    Spacer()
+                    Button(action: onClose) { Image(systemName: "xmark").font(.headline) }
+                        .foregroundStyle(.white)
+                        .accessibilityLabel("Fermer")
+                }
+                ScrollView {
+                    VStack(spacing: 8) { content }
+                }
+            }
+            .padding(18)
+            .frame(width: 360)
+            .frame(maxHeight: .infinity)
+            .background(palette.background2.opacity(0.97), in: RoundedRectangle(cornerRadius: style.radius))
+            .overlay(RoundedRectangle(cornerRadius: style.radius).stroke(palette.border))
+            .padding(.vertical, 8)
+            .padding(.trailing, 8)
+        }
+        .transition(.move(edge: .trailing))
+    }
+
+    private var title: String {
+        switch panel {
+        case .options: return "Options de lecture"
+        case .audio: return "Langue audio"
+        case .subtitles: return "Sous-titres"
+        case .speed: return "Vitesse de lecture"
+        case .fit: return "Format d'image"
+        case .sleep: return "Minuteur de sommeil"
+        case .info: return "Informations techniques"
+        case .external: return "Lecteur externe"
+        }
+    }
+
+    private var subtitle: String? {
+        switch panel {
+        case .sleep: return "Prioritaire sur la lecture automatique : la progression est enregistrée à l'arrêt."
+        case .info: return "Mise à jour chaque seconde."
+        case .external: return "Le lecteur NOVA s'arrête et la lecture continue dans l'application choisie."
+        default: return nil
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch panel {
+        case .options:
+            let audio = controller.audioTracks.first { $0.id == controller.currentAudio }?.name ?? "Automatique"
+            let subs = controller.subtitleTracks.first { $0.id == controller.currentSubtitle }?.name ?? "Désactivés"
+            PanelRow(title: "Audio", icon: "waveform", trailing: audio, chevron: true) { onSelect(.audio) }
+            PanelRow(title: "Sous-titres", icon: "captions.bubble", trailing: subs, chevron: true) { onSelect(.subtitles) }
+            if !controller.isLive {
+                PanelRow(title: "Vitesse", icon: "speedometer", trailing: speedLabel(controller.rate), chevron: true) { onSelect(.speed) }
+            }
+            PanelRow(title: "Format d'image", icon: "aspectratio", trailing: controller.fit.label, chevron: true) { onSelect(.fit) }
+            PanelRow(title: "Minuteur de sommeil", icon: "moon.zzz", trailing: controller.sleep == .off ? "Désactivé" : "Actif", chevron: true) {
+                onSelect(.sleep)
+            }
+            PanelRow(title: controller.engine == .apple ? "Passer au moteur VLC intégré" : "Passer au lecteur Apple",
+                     icon: "arrow.triangle.2.circlepath", trailing: controller.engine.label) {
+                controller.switchEngine()
+                onClose()
+            }
+            PanelRow(title: "Informations techniques", icon: "info.circle", chevron: true) { onSelect(.info) }
+            if controller.streamURL != nil {
+                PanelRow(title: "Ouvrir dans un lecteur externe", icon: "arrow.up.forward.app", chevron: true) { onSelect(.external) }
+            }
+        case .audio:
+            if controller.audioTracks.count <= 1 { PanelNote(text: "Une seule piste audio disponible.") }
+            ForEach(controller.audioTracks) { track in
+                PanelRow(title: track.name, selected: track.id == controller.currentAudio) { controller.selectAudio(track) }
+            }
+        case .subtitles:
+            PanelRow(title: "Désactivés", selected: controller.currentSubtitle < 0) { controller.selectSubtitle(nil) }
+            if controller.subtitleTracks.isEmpty { PanelNote(text: "Aucun sous-titre dans ce flux.") }
+            ForEach(controller.subtitleTracks) { track in
+                PanelRow(title: track.name, selected: track.id == controller.currentSubtitle) { controller.selectSubtitle(track) }
+            }
+        case .speed:
+            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { value in
+                PanelRow(title: speedLabel(Float(value)), selected: abs(Double(controller.rate) - value) < 0.01) { controller.setRate(Float(value)) }
+            }
+        case .fit:
+            ForEach(VideoFit.allCases) { fit in
+                PanelRow(title: fit.label, selected: controller.fit == fit) { controller.setFit(fit) }
+            }
+        case .sleep:
+            PanelRow(title: "Désactivé", selected: controller.sleep == .off) { controller.setSleep(.off); onClose() }
+            if !controller.isLive {
+                PanelRow(title: controller.current.kind == .movie ? "Fin du film" : "Fin de l'épisode", selected: controller.sleep == .endOfItem) {
+                    controller.setSleep(.endOfItem)
+                    onClose()
+                }
+            }
+            ForEach([15, 30, 45, 60, 90, 120], id: \.self) { minutes in
+                PanelRow(title: "Dans \(minutes) minutes", selected: controller.sleep == .minutes(minutes)) {
+                    controller.setSleep(.minutes(minutes))
+                    onClose()
+                }
+            }
+        case .info:
+            InfoRow(name: "Moteur", value: controller.engine.label)
+            InfoRow(name: "Résolution", value: controller.videoSize == .zero ? "—" : "\(Int(controller.videoSize.width)) × \(Int(controller.videoSize.height))")
+            InfoRow(name: "Débit", value: controller.bitrate > 0 ? String(format: "%.1f Mb/s", controller.bitrate / 1_000_000) : "—")
+            InfoRow(name: "Format", value: (controller.streamURL?.pathExtension.uppercased()).flatMap { $0.isEmpty ? nil : $0 } ?? "Fichier téléchargé")
+            InfoRow(name: "Position", value: controller.isLive ? "Direct" : "\(controller.time.clock) / \(controller.duration.clock)")
+            InfoRow(name: "Pistes", value: "\(controller.audioTracks.count) audio · \(controller.subtitleTracks.count) sous-titres")
+        case .external:
+            ForEach(ExternalPlayer.allCases) { player in
+                PanelRow(title: player.isInstalled ? player.name : "\(player.name) (à installer)", icon: "arrow.up.forward.app") { onExternal(player) }
+            }
+        }
+    }
+
+    private func speedLabel(_ value: Float) -> String {
+        value == 1 ? "Normale" : "×" + (Double(value)).formatted(.number.precision(.fractionLength(0...2)))
+    }
+}
+
+private struct PanelRow: View {
+    let title: String
+    var icon: String? = nil
+    var trailing: String? = nil
+    var selected = false
+    var chevron = false
+    let action: () -> Void
+    @Environment(\.palette) private var palette
+    @Environment(\.novaStyle) private var style
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                if let icon { Image(systemName: icon).frame(width: 22).foregroundStyle(.white) }
+                Text(title).foregroundStyle(.white).multilineTextAlignment(.leading)
+                Spacer(minLength: 8)
+                if let trailing { Text(trailing).font(.subheadline).foregroundStyle(palette.textSecondary).lineLimit(1) }
+                if selected { Image(systemName: "checkmark").font(.headline).foregroundStyle(palette.accent) }
+                if chevron { Image(systemName: "chevron.forward").font(.caption).foregroundStyle(palette.textSecondary) }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(minHeight: 48)
+            .background(palette.card, in: RoundedRectangle(cornerRadius: style.radius))
+            .overlay(RoundedRectangle(cornerRadius: style.radius).stroke(selected ? palette.accent : palette.border, lineWidth: selected ? 2 : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct PanelNote: View {
+    let text: String
+    @Environment(\.palette) private var palette
+    var body: some View {
+        Text(text).font(.footnote).foregroundStyle(palette.textSecondary).frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct InfoRow: View {
+    let name: String
+    let value: String
+    @Environment(\.palette) private var palette
+    var body: some View {
+        HStack {
+            Text(name).foregroundStyle(palette.textSecondary)
+            Spacer()
+            Text(value).foregroundStyle(.white).monospacedDigit()
+        }
+        .font(.subheadline)
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: Overlays
+
+/// Dark panel button that stays readable with every palette.
+private struct OverlayButton: View {
     let title: String
     var icon: String? = nil
     var prominent = false
     let action: () -> Void
+    @Environment(\.palette) private var palette
     @Environment(\.novaStyle) private var style
 
     var body: some View {
@@ -350,9 +865,9 @@ private struct PlayerPanelButton: View {
                 Text(title)
             }
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(prominent ? Color.black : Color.white)
+            .foregroundStyle(prominent ? palette.onAccent : .white)
             .padding(.horizontal, 16).padding(.vertical, 11)
-            .background(prominent ? Color.white : Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: style.radius))
+            .background(prominent ? palette.accent : Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: style.radius))
             .overlay(RoundedRectangle(cornerRadius: style.radius).stroke(Color.white.opacity(prominent ? 0 : 0.35)))
         }
         .buttonStyle(.plain)
@@ -363,6 +878,7 @@ private struct PlayerErrorView: View {
     let message: String
     @ObservedObject var controller: PlayerController
     let onClose: () -> Void
+    let onExternal: () -> Void
     @Environment(\.novaStyle) private var style
 
     var body: some View {
@@ -370,24 +886,16 @@ private struct PlayerErrorView: View {
             Image(systemName: "exclamationmark.triangle.fill").font(.largeTitle).foregroundStyle(.yellow)
             Text(message).multilineTextAlignment(.center).foregroundStyle(.white)
             HStack {
-                PlayerPanelButton(title: "Réessayer", icon: "arrow.clockwise", prominent: true) { controller.load(controller.index, resume: true) }
-                PlayerPanelButton(title: controller.engine == .apple ? "Moteur VLC intégré" : "Lecteur Apple", icon: "arrow.triangle.2.circlepath") {
+                OverlayButton(title: "Réessayer", icon: "arrow.clockwise", prominent: true) { controller.load(controller.index, resume: true) }
+                OverlayButton(title: controller.engine == .apple ? "Moteur VLC intégré" : "Lecteur Apple", icon: "arrow.triangle.2.circlepath") {
                     controller.switchEngine()
                 }
             }
-            if let url = controller.streamURL {
-                Text("Ou ouvrir dans une application :").font(.footnote).foregroundStyle(.white.opacity(0.7))
-                HStack {
-                    ForEach(ExternalPlayer.allCases) { player in
-                        PlayerPanelButton(title: player.name) {
-                            controller.stop()
-                            player.open(url)
-                            onClose()
-                        }
-                    }
-                }
+            HStack {
+                if controller.streamURL != nil { OverlayButton(title: "Lecteur externe", icon: "arrow.up.forward.app", action: onExternal) }
+                if controller.isLive && controller.hasNext { OverlayButton(title: "Chaîne suivante") { controller.next() } }
+                OverlayButton(title: "Fermer", action: onClose)
             }
-            PlayerPanelButton(title: "Fermer", action: onClose)
         }
         .padding(24)
         .background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: style.radius))
@@ -411,16 +919,43 @@ private struct NextUpView: View {
                     Text("Épisode suivant dans \(seconds) s").font(.caption).foregroundStyle(.white.opacity(0.8))
                     Text(title).font(.headline).foregroundStyle(.white).lineLimit(2)
                     HStack {
-                        PlayerPanelButton(title: "Lire", icon: "play.fill", prominent: true, action: onPlay)
-                        PlayerPanelButton(title: "Annuler", action: onCancel)
+                        OverlayButton(title: "Lire maintenant", icon: "play.fill", prominent: true, action: onPlay)
+                        OverlayButton(title: "Annuler", action: onCancel)
                     }
                 }
                 .padding(16)
-                .frame(maxWidth: 320, alignment: .leading)
+                .frame(maxWidth: 340, alignment: .leading)
                 .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: style.radius))
             }
             .padding(24)
             .padding(.bottom, 60)
         }
+    }
+}
+
+private struct EndScreen: View {
+    @ObservedObject var controller: PlayerController
+    let onClose: () -> Void
+    @Environment(\.novaStyle) private var style
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Text(controller.current.kind == .movie ? "Film terminé" : "Lecture terminée").font(.title3.bold()).foregroundStyle(.white)
+            HStack {
+                if controller.hasNext {
+                    OverlayButton(title: "Épisode suivant", icon: "forward.end.fill", prominent: true) { controller.next() }
+                    OverlayButton(title: "Revoir", icon: "gobackward") { controller.replay() }
+                } else {
+                    OverlayButton(title: "Revoir", icon: "gobackward", prominent: true) { controller.replay() }
+                }
+                OverlayButton(title: "Fermer", action: onClose)
+            }
+            if controller.hasNext {
+                Text("Suivant : " + (controller.items[controller.index + 1].subtitle ?? controller.items[controller.index + 1].title))
+                    .font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+            }
+        }
+        .padding(24)
+        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: style.radius))
     }
 }

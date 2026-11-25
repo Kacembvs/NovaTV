@@ -50,6 +50,13 @@ struct RootView: View {
                 PlayerScreen(request: request, profile: owner, context: context, settings: settings, downloads: downloads)
                     .environmentObject(settings)
                     .environment(\.novaStyle, settings.style)
+                    .environment(\.palette, palette)
+            }
+        }
+        .onAppear {
+            PictureInPicture.shared.onDismissPlayer = { [playback] in playback.request = nil }
+            PictureInPicture.shared.onRestorePlayer = { [playback] request in
+                if playback.request?.id != request.id { playback.request = request }
             }
         }
         .alert("Lecture", isPresented: Binding(get: { playback.message != nil }, set: { if !$0 { playback.message = nil } })) {
