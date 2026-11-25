@@ -21,7 +21,7 @@ final class SettingsBackupTests: XCTestCase {
      "settings":{"autoplayNext":false,"countdownSeconds":10,"gesturesEnabled":true,"freeRotation":true,
                  "pictureInPicture":false,"theme":"MONOCHROME","tvInterface":"PLUS","customAccent":-12345},
      "profiles":[{"id":7,"name":"Salon","type":"XTREAM","url":"http://srv.example:8080","username":"jean",
-                  "password":"ZGVmZ2hpamtsbW5vRdKjNf2tuiypAqo0NcMW2/7vNWF/781WoX7cPg==","createdAt":1700000000000}],
+                  "password":"ZGVmZ2hpamtsbW5vRdKjNf2tuiypAqrIIp6D1p4xvFuHWDV6Vdk+hoQ=","createdAt":1700000000000}],
      "favorites":[{"profileId":7,"itemKey":"live/12.ts","kind":"LIVE","title":"TF1","createdAt":1700000000000}],
      "history":[{"profileId":7,"itemKey":"movie/3.mkv","kind":"MOVIE","title":"Le film","positionMs":60000,
                  "durationMs":7200000,"updatedAt":1700000000000}],
@@ -37,7 +37,7 @@ final class SettingsBackupTests: XCTestCase {
 
     func testAndroidSealedPasswordsAreDecryptedWithTheBackupCode() throws {
         let key = try BackupManager.deriveKey("1234", salt: try XCTUnwrap(Data(base64Encoded: "AAECAwQFBgcICQoLDA0ODw==")))
-        XCTAssertEqual(try BackupManager.open(key, "ZGVmZ2hpamtsbW5vRdKjNf2tuiypAqo0NcMW2/7vNWF/781WoX7cPg=="), "motdepasse-é")
+        XCTAssertEqual(try BackupManager.open(key, "ZGVmZ2hpamtsbW5vRdKjNf2tuiypAqrIIp6D1p4xvFuHWDV6Vdk+hoQ="), "motdepasse-é")
         XCTAssertEqual(try BackupManager.open(key, "ZGVmZ2hpamtsbW5vZvKBEObGPjDc2l/QttERNkW/8WA="), "NOVA")
         XCTAssertEqual(try BackupManager.open(key, try BackupManager.seal(key, "aller-retour")), "aller-retour")
         let wrong = try BackupManager.deriveKey("0000", salt: try XCTUnwrap(Data(base64Encoded: "AAECAwQFBgcICQoLDA0ODw==")))
