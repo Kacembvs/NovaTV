@@ -175,7 +175,82 @@ final class PlayerController: ObservableObject {
             MainActor.assumeIsolated { self?.tick() }
         }
         setupRemoteCommands()
+        observeInterruptions()
         load(index, resume: !request.fromStart)
+    }
+
+    // MARK: Phone calls and other audio interruptions
+
+    /// Set while a call (Siri, alarm…) holds the audio: the engine is paused, not failed.
+    private var interrupted = false
+    private var playingBeforeInterruption = false
+
+    private func observeInterruptions() {
+        let center = NotificationCenter.default
+        center.publisher(for: AVAudioSession.interruptionNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] note in
+                guard let self,
+                      let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                      let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+                if type == .began {
+                    self.interruptionBegan()
+                } else {
+                    let options = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt).map(AVAudioSession.InterruptionOptions.init)
+                    self.interruptionEnded(resume: options?.contains(.shouldResume) ?? true)
+                }
+            }
+            .store(in: &cancellables)
+        // The end of a call is not always notified (call answered elsewhere, app in background).
+        center.publisher(for: UIApplication.didBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.interrupted else { return }
+                self.interruptionEnded(resume: true)
+            }
+            .store(in: &cancellables)
+        center.publisher(for: AVAudioSession.mediaServicesWereResetNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+                try? AVAudioSession.sharedInstance().setActive(true)
+                self.load(self.index, resume: true, forceEngine: self.engine)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func interruptionBegan() {
+        guard !interrupted else { return }
+        interrupted = true
+        playingBeforeInterruption = playing || buffering
+        saveProgress(force: true)
+        if engine == .vlc { if vlc.isPlaying { vlc.pause() } } else { player.pause() }
+        playing = false
+        updateNowPlaying()
+    }
+
+    private func interruptionEnded(resume: Bool) {
+        guard interrupted else { return }
+        interrupted = false
+        try? AVAudioSession.sharedInstance().setActive(true)
+        guard resume, playingBeforeInterruption, error == nil, !finished else { return }
+        if isLive {
+            // Back to real time instead of a stale buffer.
+            load(index, resume: false, forceEngine: engine)
+        } else if engine == .vlc {
+            if vlc.state == .error || vlc.state == .stopped || vlc.state == .ended {
+                let position = time
+                if position > 5 { resumeAt = position }
+                load(index, resume: true, forceEngine: .vlc)
+            } else {
+                vlc.play()
+            }
+        } else {
+            player.play()
+            player.rate = rate
+        }
+        updateNowPlaying()
     }
 
     var current: PlayableItem { items[index] }
@@ -212,6 +287,7 @@ final class PlayerController: ObservableObject {
     }
 
     func load(_ newIndex: Int, resume: Bool, forceEngine: PlaybackEngine? = nil) {
+        try? AVAudioSession.sharedInstance().setActive(true)
         saveProgress(force: true)
         countdownTask?.cancel()
         nextCountdown = nil
@@ -399,9 +475,12 @@ final class PlayerController: ObservableObject {
             if !languagesApplied { applyVLCLanguages() }
         case .error:
             buffering = false
+            // The audio taken by a call can stop VLC: not a stream error, resumed after the call.
+            guard !interrupted else { return }
             error = "Lecture impossible avec le moteur VLC : flux indisponible ou format non pris en charge."
         case .ended:
             buffering = false
+            guard !interrupted else { return }
             if !vlcEndHandled {
                 vlcEndHandled = true
                 if isLive { error = "Le flux s'est interrompu." } else { itemEnded() }

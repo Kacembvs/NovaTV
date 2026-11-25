@@ -316,6 +316,11 @@ struct PlayerScreen: View {
         .animation(.easeInOut(duration: 0.2), value: panel)
         .onAppear(perform: appeared)
         .onDisappear(perform: disappeared)
+        // After a call screen, the system may have changed orientation and brightness: restore ours.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            OrientationLock.set(OrientationLock.mask, preferred: OrientationLock.currentMask)
+            showControls()
+        }
     }
 
     /// Video with its controls; full screen in landscape, 16:9 above the browser in portrait.
