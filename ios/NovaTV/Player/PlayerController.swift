@@ -307,8 +307,10 @@ final class PlayerController: ObservableObject {
             resumeAt = history.position
         }
         showResumeBanner(resumeAt)
+        // Live ".ts" streams are also offered as HLS, which Apple's player (and its mini-player) reads.
+        let appleSource = local ?? StreamURLs.appleCompatible(source, kind: item.kind)
         let wanted: PlaybackEngine = forceEngine
-            ?? (settings.internalEngine == .vlc || Self.needsVLC(source) ? .vlc : .apple)
+            ?? (settings.internalEngine == .vlc || Self.needsVLC(appleSource) ? .vlc : .apple)
         if forceEngine == nil { appleFailedOnce = false }
         context.saveProgress(profileID: profile.id, item: item, position: resumeAt, duration: 0)
         resetTrackState()
