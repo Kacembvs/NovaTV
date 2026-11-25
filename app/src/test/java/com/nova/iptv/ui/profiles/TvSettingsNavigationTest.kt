@@ -130,7 +130,10 @@ class TvSettingsNavigationTest {
         compose.onNode(hasText("Lecture") and hasClickAction()).performClick()
         compose.onNodeWithText("Épisode suivant automatique").assertIsDisplayed()
         compose.onNode(hasText("Contrôle parental") and hasClickAction()).performScrollTo().performClick()
-        compose.onNodeWithText("Protéger les réglages").assertExists()
+        compose.waitUntil(5_000) {
+            shadowOf(Looper.getMainLooper()).idle()
+            compose.onAllNodesWithText("Protéger les réglages").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNode(hasText("Apparence") and hasClickAction()).performScrollTo().performClick()
         compose.onNodeWithText("Interface TV et paysage", substring = true).assertIsDisplayed()
     }
