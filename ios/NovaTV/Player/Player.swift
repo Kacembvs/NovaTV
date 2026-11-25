@@ -28,6 +28,8 @@ struct AppleVideoView: UIViewRepresentable {
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         if view.playerLayer.player !== controller.player { view.playerLayer.player = controller.player }
+        // Re-wired on every update (rotation, portrait layout, engine change) so it never points to a stale layer.
+        PictureInPicture.shared.attach(layer: view.playerLayer, controller: controller, request: request)
     }
 }
 
@@ -43,6 +45,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
     private(set) var activeController: PlayerController?
     private(set) var activeRequest: PlaybackRequest?
     private var restoring = false
+    /// Player shown while the mini-player was still open (new video, or back to full screen).
+    private weak var pendingLayer: AVPlayerLayer?
+    private var pending: (controller: PlayerController, request: PlaybackRequest)?
     var onDismissPlayer: (() -> Void)?
     var onRestorePlayer: ((PlaybackRequest) -> Void)?
 
@@ -50,20 +55,33 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
 
     func attach(layer: AVPlayerLayer, controller: PlayerController, request: PlaybackRequest) {
         guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        // Never re-target while the mini-player is showing: applied once it stops.
+        if isActive {
+            pendingLayer = layer
+            pending = (controller, request)
+            return
+        }
         if pip?.playerLayer !== layer {
             pip?.delegate = nil
             pip = AVPictureInPictureController(playerLayer: layer)
             pip?.delegate = self
         }
         pip?.canStartPictureInPictureAutomaticallyFromInline = controller.pictureInPictureAllowed
+        if activeController !== controller || activeRequest?.id != request.id { restoring = false }
         activeController = controller
         activeRequest = request
-        restoring = false
     }
 
-    func start() {
-        guard let pip, pip.isPictureInPicturePossible else { return }
+    /// Starts the mini-player, or explains why it cannot (shown to the user instead of doing nothing).
+    func start(for controller: PlayerController) -> String? {
+        guard AVPictureInPictureController.isPictureInPictureSupported() else { return "Mini-lecteur non pris en charge par cet appareil." }
+        guard controller.engine == .apple else { return "Mini-lecteur indisponible avec le moteur VLC (MKV, AVI…). Options → Passer au lecteur Apple." }
+        guard let pip, pip.playerLayer.player === controller.player else { return "Mini-lecteur pas encore prêt, réessayez." }
+        guard pip.isPictureInPicturePossible else {
+            return controller.playing ? "Mini-lecteur pas encore prêt, réessayez dans un instant." : "Lancez la lecture pour ouvrir le mini-lecteur."
+        }
         pip.startPictureInPicture()
+        return nil
     }
 
     /// The built-in VLC engine has no system mini-player.
@@ -103,12 +121,19 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
         Task { @MainActor in
-            defer { self.restoring = false }
             // Closed with ×: stop the video unless the full-screen player is showing it again.
-            guard !self.restoring, let player = self.activeController, !player.isPresented else { return }
-            player.stop()
-            self.activeController = nil
-            self.activeRequest = nil
+            if !self.restoring, let player = self.activeController, !player.isPresented {
+                player.stop()
+                self.activeController = nil
+                self.activeRequest = nil
+            }
+            self.restoring = false
+            // Bind the mini-player to the player now on screen.
+            if let layer = self.pendingLayer, layer.superlayer != nil, let pending = self.pending {
+                self.attach(layer: layer, controller: pending.controller, request: pending.request)
+            }
+            self.pendingLayer = nil
+            self.pending = nil
         }
     }
 
@@ -354,7 +379,8 @@ struct PlayerScreen: View {
             ProgressView().tint(.white).scaleEffect(1.6).allowsHitTesting(false)
         }
         if let flash {
-            Text(flash).font(.title2.bold()).foregroundStyle(.white)
+            Text(flash).font(flash.count > 12 ? .subheadline.weight(.semibold) : .title2.bold()).foregroundStyle(.white)
+                .multilineTextAlignment(.center)
                 .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
                 .allowsHitTesting(false)
         }
@@ -368,7 +394,8 @@ struct PlayerScreen: View {
         } else if controlsVisible && panel == nil {
             PlayerControls(controller: controller, scrubbing: $scrubbing, onClose: close, onPanel: open,
                            onLock: lock, onInteraction: scheduleHide, compact: compact,
-                           onFullscreen: portraitBrowse ? { toggleFullscreen(enter: compact) } : nil)
+                           onFullscreen: portraitBrowse ? { toggleFullscreen(enter: compact) } : nil,
+                           onPip: startPip)
                 .transition(.opacity)
         }
         if let from = controller.resumedFrom, !locked {
@@ -429,6 +456,12 @@ struct PlayerScreen: View {
     private func lock() {
         locked = true
         controlsVisible = false
+    }
+
+    private func startPip() {
+        if let reason = PictureInPicture.shared.start(for: controller) {
+            show(flash: reason, seconds: 3)
+        }
     }
 
     private func closePanel() {
@@ -534,10 +567,10 @@ struct PlayerScreen: View {
         }
     }
 
-    private func show(flash text: String) {
+    private func show(flash text: String, seconds: Double = 0.7) {
         flash = text
         Task {
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             if flash == text { flash = nil }
         }
     }
@@ -561,6 +594,7 @@ private struct PlayerControls: View {
     var compact = false
     /// Enter (portrait) or leave (landscape) full screen; nil when portrait viewing is off.
     var onFullscreen: (() -> Void)? = nil
+    var onPip: () -> Void = {}
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -602,8 +636,8 @@ private struct PlayerControls: View {
 
     @ViewBuilder
     private var compactButtons: some View {
-        if controller.pictureInPictureAllowed && AVPictureInPictureController.isPictureInPictureSupported() {
-            BarButton(icon: "pip.enter", label: "Mini-lecteur") { PictureInPicture.shared.start() }
+        if controller.pictureInPictureEnabled {
+            BarButton(icon: "pip.enter", label: "Mini-lecteur", action: onPip)
         }
         AirPlayButton().frame(width: 44, height: 44).background(.black.opacity(0.35), in: Circle())
         BarButton(icon: "gearshape", label: "Options de lecture") { onPanel(.options) }
@@ -616,8 +650,8 @@ private struct PlayerControls: View {
             if !controller.isLive { BarButton(icon: "speedometer", label: "Vitesse") { onPanel(.speed) } }
             BarButton(icon: controller.sleep == .off ? "moon" : "moon.zzz.fill", label: "Minuteur de sommeil",
                       highlighted: controller.sleep != .off) { onPanel(.sleep) }
-            if controller.pictureInPictureAllowed && AVPictureInPictureController.isPictureInPictureSupported() {
-                BarButton(icon: "pip.enter", label: "Mini-lecteur") { PictureInPicture.shared.start() }
+            if controller.pictureInPictureEnabled {
+                BarButton(icon: "pip.enter", label: "Mini-lecteur", action: onPip)
             }
             AirPlayButton().frame(width: 44, height: 44).background(.black.opacity(0.35), in: Circle())
             BarButton(icon: "lock", label: "Verrouiller l'écran", action: onLock)

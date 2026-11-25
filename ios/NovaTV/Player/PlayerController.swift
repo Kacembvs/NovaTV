@@ -263,6 +263,8 @@ final class PlayerController: ObservableObject {
     var streamURL: URL? { currentURL }
     var gesturesEnabled: Bool { settings.gesturesEnabled }
     var pictureInPictureAllowed: Bool { settings.pictureInPicture && engine == .apple }
+    /// Mini-player switched on in the settings (the button stays visible and explains when it cannot start).
+    var pictureInPictureEnabled: Bool { settings.pictureInPicture }
     /// True while the full-screen NOVA player shows this controller (false in the mini-player).
     var isPresented = false
 
