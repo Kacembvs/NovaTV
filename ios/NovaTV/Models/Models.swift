@@ -102,6 +102,8 @@ final class ContentCategory {
         self.count = count
         self.order = order
     }
+
+    var kind: ContentKind { ContentKind(rawValue: kindRaw) ?? .live }
 }
 
 @Model

@@ -9,17 +9,19 @@ struct SearchView: View {
     @Environment(\.palette) private var palette
     @State private var query = ""
     @State private var results: [Content] = []
+    @State private var groups: [ContentCategory] = []
     @State private var searching = false
 
     var body: some View {
         List {
             if query.trimmingCharacters(in: .whitespaces).count < 2 {
-                Text("Saisissez au moins 2 caractères pour chercher une chaîne, un film ou une série.")
+                Text("Saisissez au moins 2 caractères pour chercher une chaîne, un film, une série ou un groupe.")
                     .foregroundStyle(palette.textSecondary)
                     .listRowBackground(palette.background)
-            } else if results.isEmpty && !searching {
+            } else if results.isEmpty && groups.isEmpty && !searching {
                 Text("Aucun résultat pour « \(query) ».").foregroundStyle(palette.textSecondary).listRowBackground(palette.background)
             }
+            groupSection
             section("TV en direct", results.filter { $0.kind == .live })
             section("Films", results.filter { $0.kind == .movie })
             section("Séries", results.filter { $0.kind == .series || $0.kind == .episode })
@@ -28,12 +30,48 @@ struct SearchView: View {
         .scrollContentBackground(.hidden)
         .background(palette.background.ignoresSafeArea())
         .navigationTitle("Recherche")
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Chaînes, films, séries")
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Chaînes, films, séries, groupes")
         .task(id: query) {
             // Debounce: wait for the user to stop typing.
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
             search()
+        }
+    }
+
+    @ViewBuilder
+    private var groupSection: some View {
+        if !groups.isEmpty {
+            Section("Groupes") {
+                ForEach(groups) { group in
+                    NavigationLink(value: Route.category(group.kind, group.name)) {
+                        HStack(spacing: 12) {
+                            Image(systemName: Self.icon(group.kind)).foregroundStyle(palette.accent).frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(group.name).foregroundStyle(palette.text).lineLimit(2)
+                                Text("\(Self.kindLabel(group.kind)) · \(group.count)").font(.caption).foregroundStyle(palette.textSecondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .listRowBackground(palette.background)
+        }
+    }
+
+    private static func icon(_ kind: ContentKind) -> String {
+        switch kind {
+        case .live: return "tv"
+        case .movie: return "film"
+        default: return "rectangle.stack"
+        }
+    }
+
+    private static func kindLabel(_ kind: ContentKind) -> String {
+        switch kind {
+        case .live: return "TV en direct"
+        case .movie: return "Films"
+        default: return "Séries"
         }
     }
 
@@ -66,11 +104,15 @@ struct SearchView: View {
 
     private func search() {
         let text = query.searchFolded.trimmingCharacters(in: .whitespaces)
-        guard text.count >= 2 else { results = []; return }
+        guard text.count >= 2 else { results = []; groups = []; return }
         searching = true
         defer { searching = false }
         let id = profile.id
         let raw = query.trimmingCharacters(in: .whitespaces)
+        let categories = (try? context.fetch(FetchDescriptor<ContentCategory>(
+            predicate: #Predicate<ContentCategory> { $0.profileID == id }, sortBy: [SortDescriptor(\.order)]))) ?? []
+        // Folded match: "cinema" finds "Cinéma | FR".
+        groups = Array(categories.filter { $0.name.searchFolded.contains(text) && !settings.isLocked(id, $0.kind, $0.name) }.prefix(40))
         var descriptor = FetchDescriptor<Content>(predicate: #Predicate<Content> { $0.profileID == id && $0.name.localizedStandardContains(raw) },
                                                   sortBy: [SortDescriptor(\.sortIndex)])
         descriptor.fetchLimit = 150

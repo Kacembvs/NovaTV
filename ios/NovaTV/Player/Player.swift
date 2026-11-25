@@ -180,6 +180,54 @@ enum ScreenBrightness {
     static func set(_ value: CGFloat) { screen?.brightness = max(0, min(1, value)) }
 }
 
+// MARK: Dynamic Island / notch
+
+/// Margins that keep the player controls clear of the Dynamic Island, the rounded corners and the
+/// home indicator. Read from the window because the video itself is drawn edge to edge.
+struct PlayerInsets: Equatable {
+    var top: CGFloat = 0
+    var leading: CGFloat = 0
+    var bottom: CGFloat = 0
+    var trailing: CGFloat = 0
+
+    @MainActor
+    static func current(landscape: Bool) -> PlayerInsets {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene?.windows.first { $0.isKeyWindow } ?? scene?.windows.first
+        let safe = window?.safeAreaInsets ?? .zero
+        let hasIsland = max(safe.top, safe.left, safe.right, safe.bottom) > 30
+        if landscape {
+            // The island moves to the left or right when rotating: protect both sides the same way.
+            let side = max(safe.left, safe.right, hasIsland ? 59 : 0)
+            return PlayerInsets(top: 0, leading: side, bottom: max(safe.bottom, hasIsland ? 21 : 0), trailing: side)
+        }
+        return PlayerInsets(top: max(safe.top, hasIsland ? 59 : 0), leading: safe.left, bottom: safe.bottom, trailing: safe.right)
+    }
+}
+
+private struct PlayerInsetsKey: EnvironmentKey {
+    static let defaultValue = PlayerInsets()
+}
+
+extension EnvironmentValues {
+    var playerInsets: PlayerInsets {
+        get { self[PlayerInsetsKey.self] }
+        set { self[PlayerInsetsKey.self] = newValue }
+    }
+}
+
+private struct PlayerSafeAreaPadding: ViewModifier {
+    @Environment(\.playerInsets) private var insets
+
+    func body(content: Self.Content) -> some View {
+        content.padding(EdgeInsets(top: insets.top, leading: insets.leading, bottom: insets.bottom, trailing: insets.trailing))
+    }
+}
+
+extension View {
+    func playerSafeArea() -> some View { modifier(PlayerSafeAreaPadding()) }
+}
+
 // MARK: Player screen
 
 enum PlayerPanel: Equatable {
@@ -222,16 +270,22 @@ struct PlayerScreen: View {
     private var palette: Palette { appPalette.isLight ? Palette.of(.monochrome) : appPalette }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            videoSurface
-            VolumeBridge().frame(width: 1, height: 1).allowsHitTesting(false)
-            gestureLayer
-            feedbackLayer
-            controlsLayer
-            panelLayer
-            statusLayer
+        GeometryReader { geo in
+            ZStack {
+                Color.black
+                videoSurface
+                VolumeBridge().frame(width: 1, height: 1).allowsHitTesting(false)
+                gestureLayer
+                feedbackLayer
+                controlsLayer
+                panelLayer
+                statusLayer
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            // Recomputed on every rotation: keeps controls clear of the Dynamic Island.
+            .environment(\.playerInsets, PlayerInsets.current(landscape: geo.size.width > geo.size.height))
         }
+        .ignoresSafeArea()
         .environment(\.palette, palette)
         .environment(\.colorScheme, .dark)
         .statusBarHidden()
@@ -389,6 +443,7 @@ struct PlayerScreen: View {
             }
             .padding(24)
         }
+        .playerSafeArea()
     }
 
     // MARK: Helpers
@@ -463,6 +518,7 @@ private struct PlayerControls: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
+            .playerSafeArea()
         }
     }
 
@@ -646,6 +702,7 @@ private struct ResumeBanner: View {
             .background(.black.opacity(0.75), in: Capsule())
             .padding(.bottom, 90)
         }
+        .playerSafeArea()
     }
 }
 
@@ -661,8 +718,18 @@ private struct PlayerPanelView: View {
     @Environment(\.novaStyle) private var style
 
     var body: some View {
-        HStack(spacing: 0) {
+        ZStack(alignment: .trailing) {
             Color.black.opacity(0.35).contentShape(Rectangle()).onTapGesture(perform: onClose)
+            HStack(spacing: 0) {
+                Spacer(minLength: 0).allowsHitTesting(false)
+                panelCard
+            }
+            .playerSafeArea()
+        }
+        .transition(.move(edge: .trailing))
+    }
+
+    private var panelCard: some View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     if panel != .options {
@@ -690,8 +757,6 @@ private struct PlayerPanelView: View {
             .overlay(RoundedRectangle(cornerRadius: style.radius).stroke(palette.border))
             .padding(.vertical, 8)
             .padding(.trailing, 8)
-        }
-        .transition(.move(edge: .trailing))
     }
 
     private var title: String {
@@ -900,6 +965,7 @@ private struct PlayerErrorView: View {
         .padding(24)
         .background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: style.radius))
         .padding()
+        .playerSafeArea()
     }
 }
 
@@ -930,6 +996,7 @@ private struct NextUpView: View {
             .padding(24)
             .padding(.bottom, 60)
         }
+        .playerSafeArea()
     }
 }
 
@@ -957,5 +1024,6 @@ private struct EndScreen: View {
         }
         .padding(24)
         .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: style.radius))
+        .playerSafeArea()
     }
 }

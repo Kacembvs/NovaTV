@@ -231,6 +231,8 @@ parental.
 - **Paysage et iPad** : comme l'interface TV d'Android — rail de navigation latéral à la
   place de la barre d'onglets, et colonne de groupes avec recherche à gauche des chaînes,
   films et séries. En portrait, bouton « Groupes » avec recherche dans tous les groupes.
+  La recherche globale trouve aussi les groupes par leur nom (chaînes, films, séries).
+  Le lecteur garde ses commandes à l'écart de la Dynamic Island, quel que soit le sens de rotation.
 - **Réglages** : mêmes sections qu'Android (Profils, Lecture, Téléchargements, Langues,
   Apparence, Contrôle parental, Sauvegarde) ; barre latérale en paysage et sur iPad.
   Les sept interfaces NOVA (NOVA+, Cinéma…) appliquent couleurs et angles (droits sur

@@ -71,7 +71,13 @@ struct CategoryGridView: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        CategoryGrid(profile: profile, kind: kind, group: group)
+        Group {
+            if kind == .live {
+                ChannelList(profile: profile, group: group)
+            } else {
+                CategoryGrid(profile: profile, kind: kind, group: group)
+            }
+        }
             .background(palette.background.ignoresSafeArea())
             .navigationTitle(group)
             .navigationBarTitleDisplayMode(.inline)
