@@ -247,6 +247,7 @@ internal fun TvSettingsScreen(
                                     }
                                 }
                                 item { TvSettingToggle("Gestes luminosité / volume", "Sur écran tactile : glisser et double appui ±10 s.", playback.gesturesEnabled, vm::setGestures, Modifier.fillMaxWidth()) }
+                                item { TvSettingToggle("Lecture en portrait avec navigation", "Sur mobile tenu à la verticale : vidéo en haut, groupes, chaînes, films ou épisodes en dessous. Tourner le téléphone pour le plein écran.", playback.portraitBrowse, vm::setPortraitBrowse, Modifier.fillMaxWidth()) }
                                 item { TvSettingToggle("Rotation libre du lecteur", "Sur mobile : désactivé pour rester en paysage.", playback.freeRotation, vm::setFreeRotation, Modifier.fillMaxWidth()) }
                                 item { TvSettingToggle("Picture-in-Picture", "Sur mobile : continuer dans une petite fenêtre.", playback.pictureInPicture, vm::setPictureInPicture, Modifier.fillMaxWidth()) }
                                 item { TvSettingsDescription("Minuteur de sommeil : touche Menu dans le lecteur. Il est prioritaire sur la lecture automatique.") }

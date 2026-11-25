@@ -70,6 +70,7 @@ class BackupManager(
                 .put("countdownSeconds", playback.countdownSeconds)
                 .put("gesturesEnabled", playback.gesturesEnabled)
                 .put("freeRotation", playback.freeRotation)
+                .put("portraitBrowse", playback.portraitBrowse)
                 .put("pictureInPicture", playback.pictureInPicture)
                 .put("theme", theme.theme.name)
                 .put("tvInterface", theme.tvInterface.name)
@@ -251,6 +252,7 @@ class BackupManager(
                     countdownSeconds = s.optInt("countdownSeconds", 20),
                     gesturesEnabled = s.optBoolean("gesturesEnabled", true),
                     freeRotation = s.optBoolean("freeRotation", false),
+                    portraitBrowse = s.optBoolean("portraitBrowse", true),
                     pictureInPicture = s.optBoolean("pictureInPicture", true),
                 )
             )

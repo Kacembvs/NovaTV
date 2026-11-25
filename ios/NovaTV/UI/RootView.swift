@@ -36,12 +36,9 @@ struct SideRail: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 6) {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color(hex: 0x258BFF), in: RoundedRectangle(cornerRadius: 9))
-                    .padding(.vertical, 8)
+                NovaMark()
+                    .frame(width: 52, height: 52)
+                    .padding(.vertical, 4)
                     .accessibilityHidden(true)
                 ForEach(AppTab.allCases, id: \.self) { item in
                     let selected = item == tab
@@ -172,7 +169,7 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            NovaLogo(size: 84)
+            NovaLogo(size: 36)
             Text("Bienvenue sur NOVA").font(.largeTitle.bold()).foregroundStyle(palette.text)
             Text("Ajoutez votre playlist M3U ou votre compte Xtream Codes pour retrouver vos chaînes, films et séries.")
                 .multilineTextAlignment(.center)
@@ -195,21 +192,48 @@ struct WelcomeView: View {
     }
 }
 
+/// Same drawing as Android's `nova_mark` vector (108 × 108 viewport): blue tile with a white play
+/// triangle and a cyan four-point star.
+struct NovaMark: View {
+    var body: some View {
+        Canvas { context, size in
+            let s = min(size.width, size.height) / 108
+            func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: y * s) }
+            var tile = Path()
+            tile.move(to: p(30, 30))
+            tile.addLine(to: p(66, 30))
+            tile.addQuadCurve(to: p(78, 42), control: p(78, 30))
+            tile.addLine(to: p(78, 66))
+            tile.addQuadCurve(to: p(66, 78), control: p(78, 78))
+            tile.addLine(to: p(30, 78))
+            tile.closeSubpath()
+            context.fill(tile, with: .color(Color(hex: 0x258BFF)))
+            var play = Path()
+            play.move(to: p(43, 39))
+            play.addLine(to: p(43, 69))
+            play.addLine(to: p(67, 54))
+            play.closeSubpath()
+            context.fill(play, with: .color(.white))
+            var star = Path()
+            let points: [(CGFloat, CGFloat)] = [(76, 22), (79, 30), (87, 33), (79, 36), (76, 44), (73, 36), (65, 33), (73, 30)]
+            star.move(to: p(points[0].0, points[0].1))
+            points.dropFirst().forEach { star.addLine(to: p($0.0, $0.1)) }
+            star.closeSubpath()
+            context.fill(star, with: .color(Color(hex: 0x43D5FF)))
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+}
+
+/// Mark + "NOVA" like Android's NovaLogo (48 dp mark, 24 sp bold text, 3 sp letter spacing).
 struct NovaLogo: View {
     var size: CGFloat = 40
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: size * 0.2) {
-            ZStack(alignment: .topTrailing) {
-                RoundedRectangle(cornerRadius: size * 0.22)
-                    .fill(Color(hex: 0x258BFF))
-                    .frame(width: size, height: size)
-                    .overlay(Image(systemName: "play.fill").font(.system(size: size * 0.45)).foregroundStyle(.white))
-                Image(systemName: "sparkle").font(.system(size: size * 0.35, weight: .bold)).foregroundStyle(Color(hex: 0x43D5FF))
-                    .offset(x: size * 0.15, y: -size * 0.15)
-            }
-            Text("NOVA").font(.system(size: size * 0.6, weight: .heavy)).tracking(size * 0.08).foregroundStyle(palette.text)
+        HStack(spacing: 0) {
+            NovaMark().frame(width: size * 2, height: size * 2)
+            Text("NOVA").font(.system(size: size, weight: .bold)).tracking(size / 8).foregroundStyle(palette.text)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("NOVA")

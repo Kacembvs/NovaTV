@@ -85,6 +85,7 @@ class ProfilesViewModel(private val c: AppContainer) : ViewModel() {
     fun setCountdown(seconds: Int) = viewModelScope.launch { c.settings.setCountdownSeconds(seconds) }
     fun setGestures(enabled: Boolean) = viewModelScope.launch { c.settings.setGesturesEnabled(enabled) }
     fun setFreeRotation(enabled: Boolean) = viewModelScope.launch { c.settings.setFreeRotation(enabled) }
+    fun setPortraitBrowse(enabled: Boolean) = viewModelScope.launch { c.settings.setPortraitBrowse(enabled) }
     fun setPictureInPicture(enabled: Boolean) = viewModelScope.launch { c.settings.setPictureInPicture(enabled) }
 
     val languages: StateFlow<LanguageSettings> = c.settings.languages

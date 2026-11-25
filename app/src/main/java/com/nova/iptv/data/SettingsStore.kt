@@ -23,6 +23,8 @@ data class PlaybackSettings(
     val gesturesEnabled: Boolean = true,
     /** false = landscape only, true = follows the device (portrait allowed). */
     val freeRotation: Boolean = false,
+    /** Mobile portrait: video on top, groups / channels / films / episodes underneath. */
+    val portraitBrowse: Boolean = true,
     /** Mobile: keep watching in a small window when leaving the app. */
     val pictureInPicture: Boolean = true,
 )
@@ -66,6 +68,7 @@ class SettingsStore(private val context: Context) {
     private val countdownKey = intPreferencesKey("autoplay_countdown_seconds")
     private val gesturesKey = booleanPreferencesKey("player_gestures")
     private val freeRotationKey = booleanPreferencesKey("player_free_rotation")
+    private val portraitBrowseKey = booleanPreferencesKey("player_portrait_browse")
     private val pipKey = booleanPreferencesKey("player_pip")
     private val themeKey = stringPreferencesKey("theme")
     private val customAccentKey = intPreferencesKey("theme_custom_accent")
@@ -155,6 +158,7 @@ class SettingsStore(private val context: Context) {
             countdownSeconds = prefs[countdownKey] ?: PlaybackRules.DEFAULT_COUNTDOWN_SECONDS,
             gesturesEnabled = prefs[gesturesKey] ?: true,
             freeRotation = prefs[freeRotationKey] ?: false,
+            portraitBrowse = prefs[portraitBrowseKey] ?: true,
             pictureInPicture = prefs[pipKey] ?: true,
         )
     }
@@ -192,8 +196,13 @@ class SettingsStore(private val context: Context) {
             it[countdownKey] = settings.countdownSeconds
             it[gesturesKey] = settings.gesturesEnabled
             it[freeRotationKey] = settings.freeRotation
+            it[portraitBrowseKey] = settings.portraitBrowse
             it[pipKey] = settings.pictureInPicture
         }
+    }
+
+    suspend fun setPortraitBrowse(enabled: Boolean) {
+        context.dataStore.edit { it[portraitBrowseKey] = enabled }
     }
 
     suspend fun setPictureInPicture(enabled: Boolean) {

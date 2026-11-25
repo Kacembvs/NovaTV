@@ -233,6 +233,13 @@ parental.
   films et séries. En portrait, bouton « Groupes » avec recherche dans tous les groupes.
   La recherche globale trouve aussi les groupes par leur nom (chaînes, films, séries).
   Le lecteur garde ses commandes à l'écart de la Dynamic Island, quel que soit le sens de rotation.
+- **Lecture en portrait** (iPhone et Android) : vidéo 16:9 en haut et, en dessous, la
+  navigation du contexte de lecture — groupes → chaînes, groupes → films, groupes → séries →
+  épisodes — pour zapper ou changer de film/épisode sans quitter le lecteur. Tourner le
+  téléphone (ou le bouton plein écran) passe en plein écran ; réglage « Lecture en portrait
+  avec navigation ».
+- **Accueil** : bannière dynamique comme Android (image, Regarder / Détails, affiche),
+  défilement à la main ou automatique ; logo NOVA identique à Android.
 - **Réglages** : mêmes sections qu'Android (Profils, Lecture, Téléchargements, Langues,
   Apparence, Contrôle parental, Sauvegarde) ; barre latérale en paysage et sur iPad.
   Les sept interfaces NOVA (NOVA+, Cinéma…) appliquent couleurs et angles (droits sur

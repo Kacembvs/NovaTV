@@ -287,15 +287,18 @@ fun GroupChips(
     showFavorites: Boolean = true,
     /** Extra chips (key, label) shown after "Favoris", e.g. the user's own groups. */
     extra: List<Pair<String, String>> = emptyList(),
+    /** "Tout" chip (every group at once); off where a single group must be chosen. */
+    showAll: Boolean = true,
 ) {
     var picking by remember { mutableStateOf(false) }
     val rowState = androidx.compose.foundation.lazy.rememberLazyListState()
-    val firstGroupIndex = 2 + (if (showFavorites) 1 else 0) + extra.size
+    val leading = (if (showAll) 1 else 0) + (if (showFavorites) 1 else 0)
+    val firstGroupIndex = leading + 1 + extra.size
     // Bring the chip chosen from the search panel into view.
     LaunchedEffect(selected) {
         val index = when (selected) {
             null -> 0
-            favoritesKey -> 1
+            favoritesKey -> if (showAll) 1 else 0
             else -> extra.indexOfFirst { it.first == selected }.takeIf { it >= 0 }?.let { firstGroupIndex - extra.size + it }
                 ?: groups.indexOfFirst { it.name == selected }.takeIf { it >= 0 }?.let { firstGroupIndex + it }
         }
@@ -307,7 +310,7 @@ fun GroupChips(
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item(key = "all") {
+        if (showAll) item(key = "all") {
             FilterChip(selected = selected == null, onClick = { onSelect(null) }, label = { Text("Tout") })
         }
         if (showFavorites) item(key = "fav") {
@@ -345,7 +348,7 @@ fun GroupChips(
     }
     if (picking) {
         val entries = buildList {
-            add(GroupChoice(null, "Tout", null))
+            if (showAll) add(GroupChoice(null, "Tout", null))
             if (showFavorites) add(GroupChoice(favoritesKey, "Favoris", null))
             extra.forEach { (key, label) -> add(GroupChoice(key, label, null)) }
             groups.forEach { add(GroupChoice(it.name, it.name, it.count)) }

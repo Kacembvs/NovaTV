@@ -53,6 +53,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 import androidx.media3.ui.PlayerView
 import androidx.mediarouter.app.MediaRouteButton
 import com.google.android.gms.cast.framework.CastButtonFactory
@@ -67,11 +69,45 @@ import kotlinx.coroutines.delay
 private val ChipColor = Color(0x99000000)
 
 @Composable
-fun PlayerScreen(state: PlayerUiState, onViewCreated: (PlayerView) -> Unit, actions: PlayerActions) {
+fun PlayerScreen(
+    state: PlayerUiState,
+    onViewCreated: (PlayerView) -> Unit,
+    actions: PlayerActions,
+    browser: PortraitBrowserModel? = null,
+) {
     BackHandler(enabled = state.nextUp != null) { actions.cancelNextUp() }
-    var topBarHasFocus by remember { mutableStateOf(false) }
+    val portrait = browser != null && state.portraitBrowse && !state.isTv && !state.inPip &&
+        LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Column(Modifier.fillMaxSize().background(Color.Black)) {
+        // Same position in both layouts, so the video view survives rotations.
+        PlayerStage(
+            state,
+            onViewCreated,
+            actions,
+            compact = portrait,
+            modifier = if (portrait) {
+                Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top)).aspectRatio(16f / 9f)
+            } else {
+                Modifier.fillMaxWidth().weight(1f)
+            },
+        )
+        if (portrait && browser != null) PortraitBrowser(browser, Modifier.weight(1f))
+    }
+}
+
+/** Video with NOVA's overlays: full screen, or 16:9 above the portrait browser. */
+@Composable
+private fun PlayerStage(
+    state: PlayerUiState,
+    onViewCreated: (PlayerView) -> Unit,
+    actions: PlayerActions,
+    compact: Boolean,
+    modifier: Modifier,
+) {
+    var topBarHasFocus by remember { mutableStateOf(false) }
+    val portrait = compact
+    Box(modifier.background(Color.Black)) {
         val accent = PlayerColors.Accent.toArgb()
         val surface = PlayerColors.Panel.toArgb()
         AndroidView(
@@ -93,7 +129,7 @@ fun PlayerScreen(state: PlayerUiState, onViewCreated: (PlayerView) -> Unit, acti
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopStart),
         ) {
-            TopBar(state, actions, onFocusChanged = {
+            TopBar(state, actions, compact = portrait, onFocusChanged = {
                 topBarHasFocus = it
                 actions.onTopBarFocused(it)
             })
@@ -145,7 +181,7 @@ fun PlayerScreen(state: PlayerUiState, onViewCreated: (PlayerView) -> Unit, acti
 // region Top bar
 
 @Composable
-private fun TopBar(state: PlayerUiState, actions: PlayerActions, onFocusChanged: (Boolean) -> Unit) {
+private fun TopBar(state: PlayerUiState, actions: PlayerActions, compact: Boolean, onFocusChanged: (Boolean) -> Unit) {
     val firstButton = remember { FocusRequester() }
     LaunchedEffect(state.topBarFocusRequest) {
         if (state.topBarFocusRequest > 0) {
@@ -186,6 +222,13 @@ private fun TopBar(state: PlayerUiState, actions: PlayerActions, onFocusChanged:
         sleepLabel(state.sleep, state.kind)?.let {
             Text(it, color = PlayerColors.Accent, fontSize = 12.sp, modifier = Modifier.padding(end = 4.dp))
         }
+        if (compact) {
+            // Portrait: few buttons, the rest is in "Options de lecture".
+            if (state.pipAvailable) BarButton(Icons.Rounded.PictureInPictureAlt, "Mini-lecteur", actions::enterPip)
+            BarButton(Icons.Rounded.Settings, "Options de lecture", { actions.openPanel(PlayerPanel.OPTIONS) })
+            BarButton(Icons.Rounded.Fullscreen, "Plein écran", actions::toggleFullscreen)
+            return@Row
+        }
         if (state.audioTracks.size > 1) BarButton(Icons.Rounded.Audiotrack, "Audio", { actions.openPanel(PlayerPanel.AUDIO) })
         if (state.textTracks.isNotEmpty()) BarButton(Icons.Rounded.ClosedCaption, "Sous-titres", { actions.openPanel(PlayerPanel.SUBTITLES) })
         if (!state.isLive) BarButton(Icons.Rounded.Speed, "Vitesse", { actions.openPanel(PlayerPanel.SPEED) })
@@ -206,6 +249,7 @@ private fun TopBar(state: PlayerUiState, actions: PlayerActions, onFocusChanged:
         }
         if (state.pipAvailable) BarButton(Icons.Rounded.PictureInPictureAlt, "Mini-lecteur", actions::enterPip)
         if (!state.isTv) BarButton(Icons.Rounded.Lock, "Verrouiller l'écran", actions::toggleLock)
+        if (state.portraitBrowse && !state.isTv) BarButton(Icons.Rounded.FullscreenExit, "Quitter le plein écran", actions::toggleFullscreen)
         BarButton(Icons.AutoMirrored.Rounded.OpenInNew, "Lecteur externe", actions::openExternal)
     }
 }

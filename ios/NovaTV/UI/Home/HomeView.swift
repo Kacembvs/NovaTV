@@ -84,6 +84,18 @@ struct HomeView: View {
     private var resume: [HistoryEntry] { history.filter { $0.kind != .live && $0.isResumable } }
     private var channels: [HistoryEntry] { Array(history.filter { $0.kind == .live }.prefix(15)) }
 
+    /// Films and series alternated, as in Android's featured banner.
+    private static func featured(_ movies: [Content], _ series: [Content]) -> [Content] {
+        let m = movies.filter { $0.logo != nil }.prefix(5)
+        let s = series.filter { $0.logo != nil }.prefix(4)
+        var result: [Content] = []
+        for i in 0..<max(m.count, s.count) {
+            if i < m.count { result.append(m[m.startIndex + i]) }
+            if i < s.count { result.append(s[s.startIndex + i]) }
+        }
+        return Array(result.prefix(8))
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 26) {
@@ -95,7 +107,7 @@ struct HomeView: View {
                 } else if case .failed(let message) = sync.states[profile.id] {
                     StatusBanner(text: "Échec du chargement : \(message)", isError: true)
                 }
-                let featured = Array(visibleMovies.filter { $0.logo != nil }.prefix(8))
+                let featured = Self.featured(visibleMovies, visibleSeries)
                 if !featured.isEmpty {
                     HeroCarousel(items: featured, profile: profile)
                 }
@@ -137,7 +149,7 @@ struct HomeView: View {
         }
         .background(palette.background.ignoresSafeArea())
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { NovaLogo(size: 26) }
+            ToolbarItem(placement: .topBarLeading) { NovaLogo(size: 20) }
         }
         .novaToolbar()
         .navigationBarTitleDisplayMode(.inline)
@@ -233,51 +245,101 @@ private struct QuickTiles: View {
     }
 }
 
-/// Featured titles, swiped by hand or rotating slowly on their own.
+/// Featured titles, laid out like Android's banner (image, text and buttons on the left, poster on
+/// the right). A paging scroll view keeps the buttons working: links inside a paged TabView are disabled.
 private struct HeroCarousel: View {
     let items: [Content]
     let profile: Profile
+    @EnvironmentObject private var playback: PlaybackCoordinator
     @Environment(\.palette) private var palette
     @Environment(\.novaStyle) private var style
-    @State private var selection = 0
+    @State private var selection: String?
     @State private var lastInteraction = Date()
     private let timer = Timer.publish(every: 9, on: .main, in: .common).autoconnect()
 
+    private var currentIndex: Int { items.firstIndex { $0.key == selection } ?? 0 }
+
     var body: some View {
-        TabView(selection: $selection) {
-            ForEach(Array(items.enumerated()), id: \.element.key) { index, item in
-                ZStack(alignment: .bottomLeading) {
-                    AsyncImage(url: item.logo.flatMap(URL.init(string:))) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        palette.background2
+        VStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 0) {
+                    ForEach(items, id: \.key) { item in
+                        slide(item)
+                            .padding(.horizontal)
+                            .containerRelativeFrame(.horizontal)
+                            .id(item.key)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    LinearGradient(colors: [.clear, palette.background.opacity(0.95)], startPoint: .top, endPoint: .bottom)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("FILM").font(.caption.bold()).foregroundStyle(palette.accent2)
-                        Text(item.name).font(.title2.bold()).foregroundStyle(palette.text).lineLimit(2)
-                        if let route = route(for: item) {
-                            NavigationLink(value: route) {
-                                Label("Découvrir", systemImage: "info.circle")
-                            }
-                            .buttonStyle(.novaPrimary)
-                        }
-                    }
-                    .padding()
                 }
-                .tag(index)
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $selection)
+            .frame(height: max(230, style.heroHeight))
+            if items.count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(Array(items.enumerated()), id: \.element.key) { index, _ in
+                        Capsule().fill(index == currentIndex ? palette.accent : palette.border)
+                            .frame(width: index == currentIndex ? 18 : 6, height: 6)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: currentIndex)
+                .accessibilityHidden(true)
             }
         }
-        .tabViewStyle(.page(indexDisplayMode: .always))
-        .frame(height: style.heroHeight)
-        .novaClip()
-        .padding(.horizontal)
         .onChange(of: selection) { _, _ in lastInteraction = .now }
         .onReceive(timer) { _ in
             guard Date().timeIntervalSince(lastInteraction) > 8, items.count > 1 else { return }
-            withAnimation { selection = (selection + 1) % items.count }
+            withAnimation { selection = items[(currentIndex + 1) % items.count].key }
+        }
+    }
+
+    private func slide(_ item: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: min(style.radius, 22))
+        let meta = [item.year, item.group, item.rating.flatMap { $0 == "0" || $0.isEmpty ? nil : "★ " + $0 }].compactMap { $0 }
+        return ZStack {
+            palette.background2
+            AsyncImage(url: item.logo.flatMap(URL.init(string:))) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Color.clear
+            }
+            .opacity(0.45)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            LinearGradient(colors: [palette.background, palette.background.opacity(0.6), .clear], startPoint: .leading, endPoint: .trailing)
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(item.kind == .movie ? "FILM" : "SÉRIE").font(.caption.bold()).foregroundStyle(palette.accent)
+                    Text(item.name).font(.title3.bold()).foregroundStyle(palette.text).lineLimit(2)
+                    if !meta.isEmpty {
+                        Text(meta.joined(separator: " · ")).font(.footnote).foregroundStyle(palette.textSecondary).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    HStack(spacing: 8) {
+                        watchButton(item)
+                        if let route = route(for: item) {
+                            NavigationLink(value: route) { Label("Détails", systemImage: "info.circle") }
+                                .buttonStyle(NovaButtonStyle(prominent: false, compact: true))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                PosterImage(url: item.logo, title: item.name).frame(width: 104)
+            }
+            .padding(16)
+        }
+        .clipShape(shape)
+        .overlay(shape.stroke(palette.border, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func watchButton(_ item: Content) -> some View {
+        if item.kind == .series && item.isXtreamSeries {
+            NavigationLink(value: Route.series(item.ref)) { Label("Voir la série", systemImage: "play.fill") }
+                .buttonStyle(NovaButtonStyle(prominent: true, compact: true))
+        } else {
+            Button { playback.play([item.playable], profile: profile) } label: { Label("Regarder", systemImage: "play.fill") }
+                .buttonStyle(NovaButtonStyle(prominent: true, compact: true))
         }
     }
 }

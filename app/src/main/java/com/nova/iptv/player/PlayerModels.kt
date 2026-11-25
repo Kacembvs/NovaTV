@@ -48,6 +48,8 @@ data class PlayerUiState(
     val inPip: Boolean = false,
     /** Phone/tablet with PiP allowed: shows the "Mini-lecteur" button. */
     val pipAvailable: Boolean = false,
+    /** Mobile: portrait shows the video above the navigation; landscape is full screen. */
+    val portraitBrowse: Boolean = false,
     /** Google Cast: button shown when available (phones), device name while casting. */
     val castAvailable: Boolean = false,
     val castDevice: String? = null,
@@ -80,6 +82,8 @@ interface PlayerActions {
     fun setSpeed(speed: Float)
     fun toggleLock()
     fun enterPip()
+    /** Portrait viewing: switch between the browser layout and landscape full screen. */
+    fun toggleFullscreen()
     fun showControls()
     fun seekBy(deltaMs: Long)
     fun adjustBrightness(delta: Float)

@@ -108,6 +108,8 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
     private val tvControls = TvPlaybackControls()
     private var pipEnabled = true
     private var pipReceiver: BroadcastReceiver? = null
+    private var browser: PortraitBrowserModel? = null
+    private var orientationListener: android.view.OrientationEventListener? = null
 
     private var brightness = -1f
     private var volumeLevel = -1f
@@ -133,11 +135,20 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
         ui.update { it.copy(isTv = isTelevision()) }
+        if (!ui.value.isTv) {
+            browser = PortraitBrowserModel(
+                container,
+                lifecycleScope,
+                session.profileId,
+                PortraitBrowserModel.kindFor(session.items[session.startIndex]),
+                ::replaceQueue,
+            )
+        }
 
         setContent {
             NovaTheme {
                 val state by ui.collectAsStateWithLifecycle()
-                PlayerScreen(state = state, onViewCreated = ::configureView, actions = this@PlayerActivity)
+                PlayerScreen(state = state, onViewCreated = ::configureView, actions = this@PlayerActivity, browser = browser)
             }
         }
 
@@ -145,14 +156,17 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
             container.settings.playback.collect {
                 autoplay = it.autoplayNext
                 countdownSeconds = it.countdownSeconds
-                ui.update { state -> state.copy(gesturesEnabled = it.gesturesEnabled) }
+                val portrait = it.portraitBrowse && !ui.value.isTv
+                ui.update { state -> state.copy(gesturesEnabled = it.gesturesEnabled, portraitBrowse = portrait) }
                 pipEnabled = it.pictureInPicture
                 ui.update { state -> state.copy(pipAvailable = pipSupported()) }
                 updatePipParams()
-                requestedOrientation = if (it.freeRotation) {
-                    ActivityInfo.SCREEN_ORIENTATION_FULL_USER
-                } else {
-                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                if (orientationListener == null) {
+                    requestedOrientation = if (it.freeRotation || portrait) {
+                        ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                    } else {
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    }
                 }
             }
         }
@@ -941,6 +955,77 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
         ui.update {
             it.copy(title = item.title, subtitle = item.subtitle, kind = item.kind, canZap = session.items.size > 1)
         }
+        browser?.setCurrent(session.items, item)
+    }
+
+    /** Portrait browser: plays another channel list, film or series without leaving the player. */
+    private fun replaceQueue(items: List<PlayableItem>, start: Int) {
+        if (start !in items.indices) return
+        lifecycleScope.launch {
+            val profile = withContext(Dispatchers.IO) { container.db.profileDao().get(session.profileId) } ?: return@launch
+            val newUrls = withContext(Dispatchers.Default) { container.profiles.streamUrls(profile, items.map { it.ref }) }
+            val newOffline = withContext(Dispatchers.IO) {
+                runCatching {
+                    container.downloads.completedRequests(session.profileId, items.filter { it.kind != ContentKind.LIVE }.map { it.ref })
+                }.getOrDefault(emptyMap())
+            }
+            val p = exo ?: return@launch
+            saveProgress()
+            session = PlaybackQueue.Session(session.profileId, items, start)
+            container.playbackQueue.current = session
+            urls = newUrls
+            offline = newOffline
+            hlsFallbackTried.clear()
+            cancelledNextFor = -1
+            endHandledFor = -1
+            nextUpJob?.cancel()
+            val item = items[start]
+            var position = 0L
+            if (item.kind != ContentKind.LIVE) {
+                val history = withContext(Dispatchers.IO) { container.db.libraryDao().history(session.profileId, item.ref) }
+                if (history != null && history.positionMs > 10_000 &&
+                    (history.durationMs <= 0 || history.positionMs < history.durationMs * 0.95)
+                ) {
+                    position = history.positionMs
+                }
+            }
+            ui.update { it.copy(error = null, nextUp = null, endScreen = null, resumeFromMs = position.takeIf { it > 0 }) }
+            p.repeatMode = if (isLiveQueue) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+            p.pauseAtEndOfMediaItems = !isLiveQueue
+            loadStartedAt = System.currentTimeMillis()
+            p.setMediaItems(items.indices.map { mediaItem(it) }, start, position)
+            p.prepare()
+            p.playWhenReady = true
+            updateTitle()
+            if (isLiveQueue) monitorJob?.cancel() else startMonitor()
+            if (position > 0) lifecycleScope.launch {
+                delay(10_000)
+                ui.update { it.copy(resumeFromMs = null) }
+            }
+        }
+    }
+
+    override fun toggleFullscreen() {
+        val toLandscape = resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+        requestedOrientation = if (toLandscape) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        // Back to the sensor once the phone is held the way we forced, so turning it works again.
+        orientationListener?.disable()
+        orientationListener = object : android.view.OrientationEventListener(this) {
+            override fun onOrientationChanged(angle: Int) {
+                if (angle == ORIENTATION_UNKNOWN) return
+                val heldPortrait = angle < 25 || angle > 335
+                val heldLandscape = angle in 65..115 || angle in 245..295
+                if ((toLandscape && heldLandscape) || (!toLandscape && heldPortrait)) {
+                    disable()
+                    orientationListener = null
+                    requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                }
+            }
+        }.also { if (it.canDetectOrientation()) it.enable() }
     }
 
     private fun showBanner() {
@@ -1089,6 +1174,7 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
     override fun onDestroy() {
         super.onDestroy()
         pipReceiver?.let { unregisterReceiver(it) }
+        orientationListener?.disable()
         cast?.release()
         pipReceiver = null
         monitorJob?.cancel()

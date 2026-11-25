@@ -43,7 +43,7 @@
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.Nova.Player"
-            android:screenOrientation="sensorLandscape" />
+            android:screenOrientation="fullUser" />
         <service
             android:name=".data.download.NovaDownloadService"
             android:exported="false"
