@@ -56,6 +56,16 @@ final class PlaybackCoordinator: ObservableObject {
 enum OrientationLock {
     static var mask: UIInterfaceOrientationMask = .all
 
+    /// Orientation the screen is currently shown in.
+    @MainActor
+    static var currentMask: UIInterfaceOrientationMask {
+        switch (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.interfaceOrientation {
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        default: return .portrait
+        }
+    }
+
     @MainActor
     static func set(_ newMask: UIInterfaceOrientationMask, preferred: UIInterfaceOrientationMask) {
         mask = newMask
@@ -91,7 +101,7 @@ struct TrackChoice: Identifiable, Equatable {
 final class PlayerController: ObservableObject {
     let player = AVPlayer()
     let vlc = VLCMediaPlayer()
-    let items: [PlayableItem]
+    @Published private(set) var items: [PlayableItem]
     let profile: Profile
     @Published private(set) var index: Int
     @Published private(set) var engine: PlaybackEngine = .apple
@@ -185,6 +195,17 @@ final class PlayerController: ObservableObject {
     }
 
     // MARK: Loading
+
+    /// Portrait browser: plays another channel list, movie or series without leaving the player.
+    func replaceQueue(_ newItems: [PlayableItem], start: Int) {
+        guard newItems.indices.contains(start) else { return }
+        saveProgress(force: true)
+        // load() saves the current position again: it must not be written onto the new queue.
+        time = 0
+        index = start
+        items = newItems
+        load(start, resume: true)
+    }
 
     func load(_ newIndex: Int, resume: Bool, forceEngine: PlaybackEngine? = nil) {
         saveProgress(force: true)

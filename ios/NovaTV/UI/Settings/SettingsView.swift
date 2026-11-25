@@ -361,7 +361,11 @@ private struct PlaybackSettings: View {
             SettingHeader(text: "Écran")
             SettingToggle(title: "Picture-in-Picture", detail: "La vidéo continue dans une petite fenêtre quand vous quittez NOVA.",
                           isOn: $settings.pictureInPicture)
+            SettingToggle(title: "Lecture en portrait avec navigation",
+                          detail: "Téléphone à la verticale : vidéo en haut, groupes, chaînes, films ou épisodes en dessous. Tourner le téléphone pour le plein écran.",
+                          isOn: $settings.portraitBrowse)
             SettingToggle(title: "Rotation libre du lecteur", detail: "Désactivé : lecture en paysage uniquement.", isOn: $settings.freeRotation)
+                .disabled(settings.portraitBrowse)
             SettingToggle(title: "Gestes", detail: "Double appui à gauche ou à droite : −10 s / +10 s (moteur VLC).", isOn: $settings.gesturesEnabled)
             SettingNote(text: "Minuteur de sommeil : menu « … » dans le lecteur. Il est prioritaire sur la lecture automatique.")
         }

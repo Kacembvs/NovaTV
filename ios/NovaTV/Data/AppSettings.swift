@@ -138,6 +138,7 @@ final class AppSettings: ObservableObject {
     @Published var countdownSeconds: Int { didSet { defaults.set(countdownSeconds, forKey: "countdown") } }
     @Published var gesturesEnabled: Bool { didSet { defaults.set(gesturesEnabled, forKey: "gestures") } }
     @Published var freeRotation: Bool { didSet { defaults.set(freeRotation, forKey: "freeRotation") } }
+    @Published var portraitBrowse: Bool { didSet { defaults.set(portraitBrowse, forKey: "portraitBrowse") } }
     @Published var pictureInPicture: Bool { didSet { defaults.set(pictureInPicture, forKey: "pip") } }
 
     @Published var audioLanguage: String? { didSet { defaults.set(audioLanguage, forKey: "langAudio") } }
@@ -175,6 +176,7 @@ final class AppSettings: ObservableObject {
         countdownSeconds = defaults.object(forKey: "countdown") as? Int ?? 20
         gesturesEnabled = bool("gestures", true)
         freeRotation = bool("freeRotation", false)
+        portraitBrowse = bool("portraitBrowse", true)
         pictureInPicture = bool("pip", true)
         audioLanguage = defaults.string(forKey: "langAudio")
         subtitleLanguage = defaults.string(forKey: "langSubtitles")

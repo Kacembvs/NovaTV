@@ -59,6 +59,7 @@ enum BackupManager {
             "countdownSeconds": settings.countdownSeconds,
             "gesturesEnabled": settings.gesturesEnabled,
             "freeRotation": settings.freeRotation,
+            "portraitBrowse": settings.portraitBrowse,
             "pictureInPicture": settings.pictureInPicture,
             "theme": settings.paletteID.rawValue,
             "tvInterface": settings.style.rawValue,
@@ -169,6 +170,7 @@ enum BackupManager {
             if let v = s["countdownSeconds"] as? Int { settings.countdownSeconds = v }
             if let v = s["gesturesEnabled"] as? Bool { settings.gesturesEnabled = v }
             if let v = s["freeRotation"] as? Bool { settings.freeRotation = v }
+            if let v = s["portraitBrowse"] as? Bool { settings.portraitBrowse = v }
             if let v = s["pictureInPicture"] as? Bool { settings.pictureInPicture = v }
             if let v = s["customAccent"] as? Int { settings.customAccent = UInt32(truncatingIfNeeded: v) & 0xFF_FFFF }
             if let v = (s["tvInterface"] as? String).flatMap(NovaStyle.init(rawValue:)) { settings.style = v }

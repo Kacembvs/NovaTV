@@ -241,7 +241,9 @@ struct PlayerScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var appPalette
     private let freeRotation: Bool
-
+    private let portraitBrowse: Bool
+    /// Navigation offered under the video, from where playback started.
+    private let browseKind: ContentKind
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
     @State private var panel: PlayerPanel?
@@ -262,6 +264,12 @@ struct PlayerScreen: View {
         self.request = request
         self.profile = profile
         freeRotation = settings.freeRotation
+        portraitBrowse = settings.portraitBrowse
+        switch request.items[request.startIndex].kind {
+        case .live: browseKind = .live
+        case .movie: browseKind = .movie
+        default: browseKind = .series
+        }
         _controller = StateObject(wrappedValue: PictureInPicture.shared.reusableController(for: request)
             ?? PlayerController(request: request, profile: profile, context: context, settings: settings, downloads: downloads))
     }
@@ -271,19 +279,33 @@ struct PlayerScreen: View {
 
     var body: some View {
         GeometryReader { geo in
-            ZStack {
+            let landscape = geo.size.width > geo.size.height
+            let portrait = portraitBrowse && !landscape
+            let insets = PlayerInsets.current(landscape: landscape)
+            ZStack(alignment: .top) {
                 Color.black
-                videoSurface
-                VolumeBridge().frame(width: 1, height: 1).allowsHitTesting(false)
-                gestureLayer
-                feedbackLayer
-                controlsLayer
-                panelLayer
-                statusLayer
+                VStack(spacing: 0) {
+                    if portrait { Color.black.frame(height: insets.top) }
+                    stage(compact: portrait)
+                        .frame(width: geo.size.width, height: portrait ? geo.size.width * 9 / 16 : geo.size.height)
+                        .clipped()
+                        .environment(\.playerInsets, portrait ? PlayerInsets() : insets)
+                    if portrait {
+                        PortraitBrowser(controller: controller, profile: profile, kind: browseKind)
+                            .padding(.bottom, insets.bottom)
+                            .background(appPalette.background)
+                            .environment(\.palette, appPalette)
+                            .environment(\.colorScheme, appPalette.isLight ? .light : .dark)
+                    }
+                }
+                Group {
+                    panelLayer
+                    statusLayer
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+                .environment(\.playerInsets, insets)
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            // Recomputed on every rotation: keeps controls clear of the Dynamic Island.
-            .environment(\.playerInsets, PlayerInsets.current(landscape: geo.size.width > geo.size.height))
         }
         .ignoresSafeArea()
         .environment(\.palette, palette)
@@ -294,6 +316,19 @@ struct PlayerScreen: View {
         .animation(.easeInOut(duration: 0.2), value: panel)
         .onAppear(perform: appeared)
         .onDisappear(perform: disappeared)
+    }
+
+    /// Video with its controls; full screen in landscape, 16:9 above the browser in portrait.
+    /// The insets are recomputed on every rotation to keep the controls clear of the Dynamic Island.
+    private func stage(compact: Bool) -> some View {
+        ZStack {
+            Color.black
+            videoSurface
+            VolumeBridge().frame(width: 1, height: 1).allowsHitTesting(false)
+            gestureLayer
+            feedbackLayer
+            controlsLayer(compact: compact)
+        }
     }
 
     private var videoSurface: some View {
@@ -322,12 +357,13 @@ struct PlayerScreen: View {
     }
 
     @ViewBuilder
-    private var controlsLayer: some View {
+    private func controlsLayer(compact: Bool) -> some View {
         if locked {
             lockedOverlay
         } else if controlsVisible && panel == nil {
             PlayerControls(controller: controller, scrubbing: $scrubbing, onClose: close, onPanel: open,
-                           onLock: lock, onInteraction: scheduleHide)
+                           onLock: lock, onInteraction: scheduleHide, compact: compact,
+                           onFullscreen: portraitBrowse ? { toggleFullscreen(enter: compact) } : nil)
                 .transition(.opacity)
         }
         if let from = controller.resumedFrom, !locked {
@@ -358,8 +394,22 @@ struct PlayerScreen: View {
     private func appeared() {
         controller.isPresented = true
         PictureInPicture.shared.closeOther(than: controller)
-        OrientationLock.set(freeRotation ? .allButUpsideDown : .landscape, preferred: .landscapeRight)
+        if portraitBrowse {
+            // Opens in the way the phone is held: portrait with navigation, or landscape full screen.
+            OrientationLock.set(.allButUpsideDown, preferred: OrientationLock.currentMask)
+        } else {
+            OrientationLock.set(freeRotation ? .allButUpsideDown : .landscape, preferred: .landscapeRight)
+        }
         originalBrightness = ScreenBrightness.value
+        scheduleHide()
+    }
+
+    private func toggleFullscreen(enter: Bool) {
+        if enter {
+            OrientationLock.set(.landscape, preferred: .landscapeRight)
+        } else {
+            OrientationLock.set(.allButUpsideDown, preferred: .portrait)
+        }
         scheduleHide()
     }
 
@@ -502,6 +552,10 @@ private struct PlayerControls: View {
     let onPanel: (PlayerPanel) -> Void
     let onLock: () -> Void
     let onInteraction: () -> Void
+    /// Portrait: video above the browser, with fewer buttons.
+    var compact = false
+    /// Enter (portrait) or leave (landscape) full screen; nil when portrait viewing is off.
+    var onFullscreen: (() -> Void)? = nil
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -511,34 +565,43 @@ private struct PlayerControls: View {
                 .allowsHitTesting(false)
             VStack(spacing: 0) {
                 topBar
-                Spacer()
+                Spacer(minLength: 0)
                 transport
-                Spacer()
+                Spacer(minLength: 0)
                 bottomBar
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, compact ? 10 : 16)
+            .padding(.vertical, compact ? 6 : 10)
             .playerSafeArea()
         }
     }
 
     private var topBar: some View {
-        HStack(spacing: 10) {
-            BarButton(icon: "chevron.backward", label: "Retour", action: onClose)
+        HStack(spacing: compact ? 6 : 10) {
+            BarButton(icon: compact ? "chevron.down" : "chevron.backward", label: "Retour", action: onClose)
             VStack(alignment: .leading, spacing: 2) {
-                Text(controller.current.title).font(.headline).foregroundStyle(.white).lineLimit(1)
+                Text(controller.current.title).font(compact ? .subheadline.weight(.semibold) : .headline).foregroundStyle(.white).lineLimit(1)
                 if let subtitle = controller.current.subtitle {
                     Text(subtitle).font(.caption).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
                 }
             }
-            if controller.isLive {
+            if controller.isLive && !compact {
                 Text("EN DIRECT").font(.caption2.bold()).foregroundStyle(.white)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Color.red, in: RoundedRectangle(cornerRadius: 4))
             }
-            Spacer(minLength: 8)
-            actionButtons
+            Spacer(minLength: 4)
+            if compact { compactButtons } else { actionButtons }
         }
+    }
+
+    @ViewBuilder
+    private var compactButtons: some View {
+        if controller.pictureInPictureAllowed && AVPictureInPictureController.isPictureInPictureSupported() {
+            BarButton(icon: "pip.enter", label: "Mini-lecteur") { PictureInPicture.shared.start() }
+        }
+        AirPlayButton().frame(width: 44, height: 44).background(.black.opacity(0.35), in: Circle())
+        BarButton(icon: "gearshape", label: "Options de lecture") { onPanel(.options) }
     }
 
     @ViewBuilder
@@ -553,25 +616,40 @@ private struct PlayerControls: View {
             }
             AirPlayButton().frame(width: 44, height: 44).background(.black.opacity(0.35), in: Circle())
             BarButton(icon: "lock", label: "Verrouiller l'écran", action: onLock)
+            if let onFullscreen {
+                BarButton(icon: "arrow.down.right.and.arrow.up.left", label: "Quitter le plein écran", action: onFullscreen)
+            }
             BarButton(icon: "gearshape", label: "Options de lecture") { onPanel(.options) }
     }
 
     private var transport: some View {
-        HStack(spacing: 40) {
+        let small: CGFloat = compact ? 20 : 26
+        return HStack(spacing: compact ? 28 : 40) {
             if controller.isLive {
-                if controller.index > 0 { TransportButton(icon: "backward.end.fill", label: "Chaîne précédente") { controller.previous(); onInteraction() } }
+                if controller.index > 0 { TransportButton(icon: "backward.end.fill", label: "Chaîne précédente", size: small) { controller.previous(); onInteraction() } }
             } else {
-                TransportButton(icon: "gobackward.10", label: "Reculer de 10 secondes") { controller.skip(-10); onInteraction() }
+                TransportButton(icon: "gobackward.10", label: "Reculer de 10 secondes", size: small) { controller.skip(-10); onInteraction() }
             }
-            TransportButton(icon: controller.playing ? "pause.fill" : "play.fill", label: controller.playing ? "Pause" : "Lecture", size: 36) {
+            TransportButton(icon: controller.playing ? "pause.fill" : "play.fill", label: controller.playing ? "Pause" : "Lecture", size: compact ? 26 : 36) {
                 controller.togglePlay()
                 onInteraction()
             }
             if controller.isLive {
-                if controller.hasNext { TransportButton(icon: "forward.end.fill", label: "Chaîne suivante") { controller.next(); onInteraction() } }
+                if controller.hasNext { TransportButton(icon: "forward.end.fill", label: "Chaîne suivante", size: small) { controller.next(); onInteraction() } }
             } else {
-                TransportButton(icon: "goforward.10", label: "Avancer de 10 secondes") { controller.skip(10); onInteraction() }
+                TransportButton(icon: "goforward.10", label: "Avancer de 10 secondes", size: small) { controller.skip(10); onInteraction() }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var fullscreenButton: some View {
+        if compact, let onFullscreen {
+            Button(action: onFullscreen) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+            }
+            .accessibilityLabel("Plein écran")
         }
     }
 
@@ -579,18 +657,21 @@ private struct PlayerControls: View {
     private var bottomBar: some View {
         if !controller.isLive && controller.duration > 0 {
             let position = scrubbing ?? min(1, controller.time / controller.duration)
-            VStack(spacing: 4) {
-                Slider(value: Binding(get: { position }, set: { scrubbing = $0; onInteraction() }), in: 0...1) { editing in
-                    if !editing, let value = scrubbing {
-                        controller.seek(toFraction: value)
-                        scrubbing = nil
+            VStack(spacing: compact ? 0 : 4) {
+                HStack(spacing: 6) {
+                    Slider(value: Binding(get: { position }, set: { scrubbing = $0; onInteraction() }), in: 0...1) { editing in
+                        if !editing, let value = scrubbing {
+                            controller.seek(toFraction: value)
+                            scrubbing = nil
+                        }
                     }
+                    .tint(palette.accent)
+                    fullscreenButton
                 }
-                .tint(palette.accent)
                 HStack {
                     Text((position * controller.duration).clock)
                     Spacer()
-                    if controller.hasNext {
+                    if controller.hasNext && !compact {
                         Button { controller.next() } label: {
                             Label(controller.items[controller.index + 1].kind == .episode ? "Épisode suivant" : "Suivant", systemImage: "forward.end")
                                 .font(.caption.weight(.semibold))
@@ -605,8 +686,15 @@ private struct PlayerControls: View {
             }
         } else {
             HStack {
-                Text(controller.engine.label).font(.caption).foregroundStyle(.white.opacity(0.6))
+                if controller.isLive && compact {
+                    Text("EN DIRECT").font(.caption2.bold()).foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.red, in: RoundedRectangle(cornerRadius: 4))
+                } else {
+                    Text(controller.engine.label).font(.caption).foregroundStyle(.white.opacity(0.6))
+                }
                 Spacer()
+                fullscreenButton
             }
         }
     }

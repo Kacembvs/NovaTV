@@ -108,6 +108,9 @@ struct RootView: View {
             if let owner = context.profile(request.profileID) {
                 PlayerScreen(request: request, profile: owner, context: context, settings: settings, downloads: downloads)
                     .environmentObject(settings)
+                    .environmentObject(epg)
+                    .environmentObject(downloads)
+                    .environmentObject(playback)
                     .environment(\.novaStyle, settings.style)
                     .environment(\.palette, palette)
             }
