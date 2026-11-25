@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -186,7 +187,9 @@ private fun FeaturedSlide(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)) {
+                // The texts give way first: the buttons always keep their room in the banner.
+                Column(Modifier.weight(1f, fill = false).clipToBounds(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     if (item.kind == ContentKind.MOVIE) "FILM" else "SÉRIE",
                     color = NovaColors.Cyan,
@@ -196,6 +199,7 @@ private fun FeaturedSlide(
                 Text(
                     item.name,
                     fontSize = if (cinematic) 40.sp else if (tv) 30.sp else 22.sp,
+                    lineHeight = if (cinematic) 44.sp else if (tv) 34.sp else 26.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -204,6 +208,7 @@ private fun FeaturedSlide(
                 Text(meta.joinToString(" · "), color = NovaColors.TextSecondary, fontSize = 13.sp, maxLines = 1)
                 item.description?.takeUnless { compact }?.let {
                     Text(it, color = NovaColors.TextSecondary, fontSize = 13.sp, maxLines = if (tv) 3 else 2, overflow = TextOverflow.Ellipsis)
+                }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
                     Button(onClick = { onWatch(item) }) {

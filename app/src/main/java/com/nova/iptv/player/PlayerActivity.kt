@@ -51,6 +51,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.offline.DownloadRequest
@@ -203,7 +204,9 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
             .setHandleAudioBecomingNoisy(true)
             .build()
         exo = exoPlayer
-
+        // Exact seeks decode from the previous keyframe and feel slow on IPTV streams;
+        // ±0.5 s lands almost instantly, like external players.
+        exoPlayer.setSeekParameters(SeekParameters(500_000, 500_000))
         // The built-in controls keep play/pause, seek bar and previous/next; speed and tracks are
         // handled by NOVA's own panels, so those commands are hidden from the default UI.
         val wrapped = object : ForwardingPlayer(exoPlayer) {
@@ -903,6 +906,26 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
         view.setShowNextButton(true)
         view.setShowPreviousButton(true)
         view.setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+        // Live preview while the progress bar is dragged (the default only seeks on release).
+        view.findViewById<androidx.media3.ui.DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.addListener(
+            object : androidx.media3.ui.TimeBar.OnScrubListener {
+                private var lastSeekAt = 0L
+                override fun onScrubStart(timeBar: androidx.media3.ui.TimeBar, position: Long) = Unit
+                override fun onScrubMove(timeBar: androidx.media3.ui.TimeBar, position: Long) {
+                    val p = exo ?: return
+                    val now = android.os.SystemClock.uptimeMillis()
+                    if (isLiveQueue || !p.isCurrentMediaItemSeekable || now - lastSeekAt < 150) return
+                    lastSeekAt = now
+                    p.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+                    p.seekTo(position)
+                }
+                override fun onScrubStop(timeBar: androidx.media3.ui.TimeBar, position: Long, canceled: Boolean) {
+                    val p = exo ?: return
+                    p.setSeekParameters(SeekParameters(500_000, 500_000))
+                    if (!canceled && !isLiveQueue && p.isCurrentMediaItemSeekable) p.seekTo(position)
+                }
+            }
+        )
         if (ui.value.isTv) {
             view.setControllerAnimationEnabled(false)
             tvControls.installFocusIndicators(view, NovaTvInterface.current.cardRadius)
