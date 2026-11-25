@@ -131,7 +131,7 @@ private struct NovaCardModifier: ViewModifier {
     @Environment(\.palette) private var palette
     @Environment(\.novaStyle) private var style
 
-    func body(content: Content) -> some View {
+    func body(content: Self.Content) -> some View {
         content
             .padding(padding)
             .background(palette.card, in: RoundedRectangle(cornerRadius: style.radius))
@@ -141,7 +141,7 @@ private struct NovaCardModifier: ViewModifier {
 
 private struct NovaClipModifier: ViewModifier {
     @Environment(\.novaStyle) private var style
-    func body(content: Content) -> some View {
+    func body(content: Self.Content) -> some View {
         content.clipShape(RoundedRectangle(cornerRadius: style.radius))
     }
 }
