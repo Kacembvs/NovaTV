@@ -34,20 +34,14 @@ struct CatalogView: View {
     private var visible: [ContentCategory] { categories.filter { !settings.isLocked(profile.id, kind, $0.name) } }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(visible) { category in
-                        NovaChip(title: category.name, selected: (selected ?? visible.first?.name) == category.name) { selected = category.name }
-                    }
-                    if categories.count > visible.count {
-                        Button { askPin = true } label: { Label("\(categories.count - visible.count) masquée(s)", systemImage: "lock.fill") }
-                            .buttonStyle(.novaSecondary)
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+        GroupBrowser(title: kind == .movie ? "Catégories de films" : "Catégories de séries",
+                     entries: visible.map { GroupEntry(key: $0.name, title: $0.name, count: $0.count) },
+                     selected: $selected) {
+            if categories.count > visible.count {
+                Button { askPin = true } label: { Label("\(categories.count - visible.count) masquée(s)", systemImage: "lock.fill") }
+                    .buttonStyle(.novaSecondary)
             }
+        } content: {
             if categories.isEmpty {
                 EmptyStateView(systemImage: kind == .movie ? "film" : "rectangle.stack",
                                title: kind == .movie ? "Aucun film" : "Aucune série",

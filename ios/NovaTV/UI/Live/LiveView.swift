@@ -20,20 +20,18 @@ struct LiveView: View {
     private var visible: [ContentCategory] { categories.filter { !settings.isLocked(profile.id, .live, $0.name) } }
     private var hiddenCount: Int { categories.count - visible.count }
 
+    private var entries: [GroupEntry] {
+        [GroupEntry(key: Self.favoritesChip, title: "Favoris", icon: "star.fill")]
+            + visible.map { GroupEntry(key: $0.name, title: $0.name, count: $0.count) }
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    chip(Self.favoritesChip, count: nil)
-                    ForEach(visible) { category in chip(category.name, count: category.count) }
-                    if hiddenCount > 0 {
-                        Button { askPin = true } label: { Label("\(hiddenCount) masquée(s)", systemImage: "lock.fill") }
-                            .buttonStyle(.novaSecondary)
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+        GroupBrowser(title: "Groupes de chaînes", entries: entries, selected: $selected, defaultKey: visible.first?.name) {
+            if hiddenCount > 0 {
+                Button { askPin = true } label: { Label("\(hiddenCount) masquée(s)", systemImage: "lock.fill") }
+                    .buttonStyle(.novaSecondary)
             }
+        } content: {
             if categories.isEmpty {
                 EmptyStateView(systemImage: "tv", title: "Aucune chaîne", message: "Le catalogue de ce profil est vide ou en cours de chargement.")
             } else if selected == Self.favoritesChip {
@@ -54,9 +52,6 @@ struct LiveView: View {
         }
     }
 
-    private func chip(_ name: String, count: Int?) -> some View {
-        NovaChip(title: name, count: count, selected: (selected ?? visible.first?.name) == name) { selected = name }
-    }
 }
 
 struct ChannelList: View {

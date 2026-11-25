@@ -228,6 +228,9 @@ parental.
 - **Mini-lecteur** (Picture-in-Picture, lecteur Apple) : automatique en quittant l'app,
   ou bouton « Mini-lecteur » pour continuer à naviguer dans NOVA ; la fenêtre se déplace,
   se redimensionne et se range sur le bord de l'écran ; toucher pour revenir en plein écran.
+- **Paysage et iPad** : comme l'interface TV d'Android — rail de navigation latéral à la
+  place de la barre d'onglets, et colonne de groupes avec recherche à gauche des chaînes,
+  films et séries. En portrait, bouton « Groupes » avec recherche dans tous les groupes.
 - **Réglages** : mêmes sections qu'Android (Profils, Lecture, Téléchargements, Langues,
   Apparence, Contrôle parental, Sauvegarde) ; barre latérale en paysage et sur iPad.
   Les sept interfaces NOVA (NOVA+, Cinéma…) appliquent couleurs et angles (droits sur
@@ -309,6 +312,7 @@ sur une playlist publique réelle (231 chaînes, 33 catégories).
 | Langues audio / sous-titres préférées (réglages + mémorisation du choix fait dans le lecteur) | Fait |
 | Actualisation automatique WorkManager toutes les 12 h (playlists + guide), désactivable | Fait |
 | Groupes de chaînes personnalisés (créer, renommer, supprimer, zapping dans le groupe, sauvegardés) | Fait |
+| Recherche de groupes : puce « Groupes » qui déplie une liste complète filtrable (sans accents ni majuscules), puis fait défiler la ligne jusqu'au groupe choisi | Fait |
 | Google Cast (Default Media Receiver) : diffusion, pause, zapping, reprise locale à l'arrêt | Fait (dépend de la compatibilité du flux) |
 | Tests sur appareils réels, version release signée (à la demande) | À faire |
 | Tests instrumentés / sur Android TV réelle | À faire |

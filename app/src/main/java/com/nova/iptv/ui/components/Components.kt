@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
@@ -287,7 +288,22 @@ fun GroupChips(
     /** Extra chips (key, label) shown after "Favoris", e.g. the user's own groups. */
     extra: List<Pair<String, String>> = emptyList(),
 ) {
+    var picking by remember { mutableStateOf(false) }
+    val rowState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val firstGroupIndex = 2 + (if (showFavorites) 1 else 0) + extra.size
+    // Bring the chip chosen from the search panel into view.
+    LaunchedEffect(selected) {
+        val index = when (selected) {
+            null -> 0
+            favoritesKey -> 1
+            else -> extra.indexOfFirst { it.first == selected }.takeIf { it >= 0 }?.let { firstGroupIndex - extra.size + it }
+                ?: groups.indexOfFirst { it.name == selected }.takeIf { it >= 0 }?.let { firstGroupIndex + it }
+        }
+        if (index != null) rowState.animateScrollToItem(index)
+    }
+    Column {
     LazyRow(
+        state = rowState,
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -300,6 +316,15 @@ fun GroupChips(
                 onClick = { onSelect(favoritesKey) },
                 label = { Text("Favoris") },
                 leadingIcon = { Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(16.dp)) },
+            )
+        }
+        // After "Tout"/"Favoris" so the remote's Up key from the content still lands on "Tout".
+        item(key = "search") {
+            FilterChip(
+                selected = picking,
+                onClick = { picking = !picking },
+                label = { Text("Groupes  ${groups.size + extra.size}") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = "Rechercher un groupe", modifier = Modifier.size(16.dp)) },
             )
         }
         items(extra, key = { "x:" + it.first }) { (key, label) ->
@@ -317,6 +342,103 @@ fun GroupChips(
                 label = { Text("${group.name}  ${group.count}", maxLines = 1) },
             )
         }
+    }
+    if (picking) {
+        val entries = buildList {
+            add(GroupChoice(null, "Tout", null))
+            if (showFavorites) add(GroupChoice(favoritesKey, "Favoris", null))
+            extra.forEach { (key, label) -> add(GroupChoice(key, label, null)) }
+            groups.forEach { add(GroupChoice(it.name, it.name, it.count)) }
+        }
+        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+        val tv = isTvLayout()
+        GroupPickerPanel(entries, selected, onSelect = {
+            onSelect(it)
+            picking = false
+            // The focused "Groupes" chip would otherwise keep the row from scrolling to the choice.
+            if (!tv) focusManager.clearFocus()
+        }, onDismiss = { picking = false })
+    }
+    }
+}
+
+internal data class GroupChoice(val key: String?, val label: String, val count: Int?)
+
+private val diacritics = Regex("\\p{Mn}+")
+
+/** Case- and accent-insensitive group filter ("cinema" finds "Cinéma | FR"). */
+internal fun filterGroups(entries: List<GroupChoice>, query: String): List<GroupChoice> {
+    fun fold(text: String) = diacritics.replace(java.text.Normalizer.normalize(text.lowercase(), java.text.Normalizer.Form.NFD), "")
+    val needle = fold(query.trim())
+    return if (needle.isEmpty()) entries else entries.filter { fold(it.label).contains(needle) }
+}
+
+/** Searchable list of every group, unfolded under the chips instead of scrolling a long row. */
+@Composable
+private fun GroupPickerPanel(
+    entries: List<GroupChoice>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val shown = remember(entries, query) { filterGroups(entries, query) }
+    val radius = LocalTvInterface.current.cardRadius.dp
+        Surface(
+            shape = RoundedCornerShape(radius),
+            color = NovaColors.Background2,
+            border = BorderStroke(1.dp, NovaColors.Border),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).heightIn(max = 420.dp),
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Groupes", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, contentDescription = "Fermer") }
+                }
+                val inputFocus = remember { FocusRequester() }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth().focusRequester(inputFocus),
+                    placeholder = { Text("Rechercher un groupe") },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Rounded.Close, contentDescription = "Effacer") }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+                if (!isTvLayout()) LaunchedEffect(Unit) { inputFocus.requestFocus() }
+                if (shown.isEmpty()) {
+                    Text("Aucun groupe ne correspond à « $query ».", color = NovaColors.TextSecondary, modifier = Modifier.padding(vertical = 12.dp))
+                }
+                Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    shown.forEach { entry ->
+                        val isSelected = entry.key == selected
+                        NovaCard(
+                            onClick = { onSelect(entry.key) },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else NovaColors.Card,
+                            focusScale = 1.02f,
+                        ) {
+                            Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    entry.label,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else NovaColors.TextPrimary,
+                                )
+                                entry.count?.let {
+                                    Text("$it", fontSize = 12.sp, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else NovaColors.TextSecondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
     }
 }
 

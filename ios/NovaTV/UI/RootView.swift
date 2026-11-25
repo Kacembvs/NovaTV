@@ -1,7 +1,73 @@
 import SwiftData
 import SwiftUI
 
-enum AppTab: Hashable { case home, live, movies, series, downloads }
+enum AppTab: Hashable, CaseIterable {
+    case home, live, movies, series, downloads
+
+    var title: String {
+        switch self {
+        case .home: return "Accueil"
+        case .live: return "TV"
+        case .movies: return "Films"
+        case .series: return "Séries"
+        case .downloads: return "Téléchargements"
+        }
+    }
+
+    var shortTitle: String { self == .downloads ? "Hors ligne" : title }
+
+    var icon: String {
+        switch self {
+        case .home: return "house.fill"
+        case .live: return "tv"
+        case .movies: return "film"
+        case .series: return "rectangle.stack"
+        case .downloads: return "arrow.down.circle"
+        }
+    }
+}
+
+/// Landscape navigation, like the side menu of the TV interfaces on Android.
+struct SideRail: View {
+    @Binding var tab: AppTab
+    @Environment(\.palette) private var palette
+    @Environment(\.novaStyle) private var style
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 6) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Color(hex: 0x258BFF), in: RoundedRectangle(cornerRadius: 9))
+                    .padding(.vertical, 8)
+                    .accessibilityHidden(true)
+                ForEach(AppTab.allCases, id: \.self) { item in
+                    let selected = item == tab
+                    Button { tab = item } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: item.icon).font(.system(size: 19, weight: .semibold))
+                            Text(item.shortTitle).font(.caption2.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .foregroundStyle(selected ? palette.onAccent : palette.textSecondary)
+                        .frame(width: 72, height: 54)
+                        .background(selected ? palette.accent : Color.clear, in: RoundedRectangle(cornerRadius: min(style.radius, 14)))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(item.title)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+        }
+        .frame(width: 84)
+        .background(palette.background2.ignoresSafeArea())
+        .overlay(alignment: .trailing) { Rectangle().fill(palette.border).frame(width: 1).ignoresSafeArea() }
+    }
+}
 
 struct RootView: View {
     @EnvironmentObject private var settings: AppSettings
@@ -11,6 +77,7 @@ struct RootView: View {
     @EnvironmentObject private var downloads: DownloadCenter
     @Environment(\.modelContext) private var context
     @Environment(\.palette) private var palette
+    @Environment(\.isWideLayout) private var wide
     @Query(sort: \Profile.createdAt) private var profiles: [Profile]
     @State private var tab = AppTab.home
     @State private var showAddProfile = false
@@ -22,17 +89,9 @@ struct RootView: View {
     var body: some View {
         Group {
             if let profile {
-                TabView(selection: $tab) {
-                    NavigationStack { HomeView(profile: profile, openTab: { tab = $0 }) }
-                        .tabItem { Label("Accueil", systemImage: "house.fill") }.tag(AppTab.home)
-                    NavigationStack { LiveView(profile: profile) }
-                        .tabItem { Label("TV", systemImage: "tv") }.tag(AppTab.live)
-                    NavigationStack { CatalogView(profile: profile, kind: .movie) }
-                        .tabItem { Label("Films", systemImage: "film") }.tag(AppTab.movies)
-                    NavigationStack { CatalogView(profile: profile, kind: .series) }
-                        .tabItem { Label("Séries", systemImage: "rectangle.stack") }.tag(AppTab.series)
-                    NavigationStack { DownloadsView(profile: profile) }
-                        .tabItem { Label("Téléchargements", systemImage: "arrow.down.circle") }.tag(AppTab.downloads)
+                HStack(spacing: 0) {
+                    if wide { SideRail(tab: $tab) }
+                    tabs(profile)
                 }
                 .id(profile.id)
                 .onAppear { prepare(profile) }
@@ -63,6 +122,28 @@ struct RootView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(playback.message ?? "")
+        }
+    }
+
+    /// Tabs keep their navigation state; in landscape the bottom bar is replaced by the side rail.
+    private func tabs(_ profile: Profile) -> some View {
+        let bar: Visibility = wide ? .hidden : .visible
+        return TabView(selection: $tab) {
+            NavigationStack { HomeView(profile: profile, openTab: { tab = $0 }) }
+                .toolbar(bar, for: .tabBar)
+                .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.icon) }.tag(AppTab.home)
+            NavigationStack { LiveView(profile: profile) }
+                .toolbar(bar, for: .tabBar)
+                .tabItem { Label(AppTab.live.title, systemImage: AppTab.live.icon) }.tag(AppTab.live)
+            NavigationStack { CatalogView(profile: profile, kind: .movie) }
+                .toolbar(bar, for: .tabBar)
+                .tabItem { Label(AppTab.movies.title, systemImage: AppTab.movies.icon) }.tag(AppTab.movies)
+            NavigationStack { CatalogView(profile: profile, kind: .series) }
+                .toolbar(bar, for: .tabBar)
+                .tabItem { Label(AppTab.series.title, systemImage: AppTab.series.icon) }.tag(AppTab.series)
+            NavigationStack { DownloadsView(profile: profile) }
+                .toolbar(bar, for: .tabBar)
+                .tabItem { Label(AppTab.downloads.title, systemImage: AppTab.downloads.icon) }.tag(AppTab.downloads)
         }
     }
 

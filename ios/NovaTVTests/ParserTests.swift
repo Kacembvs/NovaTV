@@ -2,6 +2,13 @@ import XCTest
 @testable import NovaTV
 
 final class ParserTests: XCTestCase {
+    func testGroupSearchIgnoresAccentsAndCase() {
+        let groups = [GroupEntry(key: "a", title: "Cinéma | FR"), GroupEntry(key: "b", title: "Sport"), GroupEntry(key: "c", title: "CINEMA UK")]
+        XCTAssertEqual(filterGroups(groups, query: "cinema").map(\.key), ["a", "c"])
+        XCTAssertEqual(filterGroups(groups, query: "  ").map(\.key), ["a", "b", "c"])
+        XCTAssertTrue(filterGroups(groups, query: "docu").isEmpty)
+    }
+
     func testM3UEntriesKeepGroupsLogosAndNamesWithCommas() {
         let playlist = """
         \u{FEFF}#EXTM3U url-tvg="http://epg.example/guide.xml.gz"
