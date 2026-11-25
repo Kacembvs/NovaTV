@@ -56,6 +56,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | tee build.log | grep -E "error:|BUILD" || true
           grep -q "BUILD SUCCEEDED" build.log
 
+      - name: Check App Transport Security (plain HTTP IPTV servers)
+        run: |
+          PLIST=build/Build/Products/Release-iphoneos/NovaTV.app/Info.plist
+          plutil -extract NSAppTransportSecurity json -o - "$PLIST"
+          test "$(plutil -extract NSAppTransportSecurity.NSAllowsArbitraryLoads raw -o - "$PLIST")" = "true"
+          for key in NSAllowsArbitraryLoadsForMedia NSAllowsArbitraryLoadsInWebContent NSAllowsLocalNetworking; do
+            if plutil -extract "NSAppTransportSecurity.$key" raw -o - "$PLIST" >/dev/null 2>&1; then
+              echo "::error::$key makes iOS ignore NSAllowsArbitraryLoads"; exit 1
+            fi
+          done
+
       - name: Package IPA
         run: |
           rm -rf Payload && mkdir Payload

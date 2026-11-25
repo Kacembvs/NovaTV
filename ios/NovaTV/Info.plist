@@ -53,10 +53,9 @@
 	<string>Dark</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- IPTV providers commonly serve playlists and streams over plain HTTP. -->
+		<!-- IPTV providers commonly serve playlists and streams over plain HTTP. Do not add
+		     NSAllowsArbitraryLoadsForMedia/InWebContent/LocalNetworking: iOS then ignores NSAllowsArbitraryLoads. -->
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsArbitraryLoadsForMedia</key>
 		<true/>
 	</dict>
 	<key>LSApplicationQueriesSchemes</key>
