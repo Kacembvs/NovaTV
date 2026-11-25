@@ -659,7 +659,11 @@ private struct PlayerControls: View {
             let position = scrubbing ?? min(1, controller.time / controller.duration)
             VStack(spacing: compact ? 0 : 4) {
                 HStack(spacing: 6) {
-                    Slider(value: Binding(get: { position }, set: { scrubbing = $0; onInteraction() }), in: 0...1) { editing in
+                    Slider(value: Binding(get: { position }, set: {
+                        scrubbing = $0
+                        controller.scrub(toFraction: $0)
+                        onInteraction()
+                    }), in: 0...1) { editing in
                         if !editing, let value = scrubbing {
                             controller.seek(toFraction: value)
                             scrubbing = nil

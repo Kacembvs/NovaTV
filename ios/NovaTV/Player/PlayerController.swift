@@ -148,6 +148,10 @@ final class PlayerController: ObservableObject {
     private var appleFailedOnce = false
     private var vlcPendingPlay = false
     private var lastSave = Date.distantPast
+    /// Position asked by the user (bar, ±10 s) that the engine has not reached yet.
+    private var pendingSeek: Double?
+    private var pendingSeekSince = Date.distantPast
+    private var lastScrub = Date.distantPast
     private var audibleGroup: AVMediaSelectionGroup?
     private var legibleGroup: AVMediaSelectionGroup?
 
@@ -244,6 +248,7 @@ final class PlayerController: ObservableObject {
     }
 
     private func resetTrackState() {
+        pendingSeek = nil
         time = 0
         duration = 0
         buffering = true
@@ -369,7 +374,7 @@ final class PlayerController: ObservableObject {
 
     private func tickApple() {
         let now = player.currentTime().seconds
-        if now.isFinite { time = now }
+        if now.isFinite { time = reported(now) }
         let d = player.currentItem?.duration.seconds ?? 0
         duration = d.isFinite && d > 0 ? d : 0
         playing = player.timeControlStatus == .playing
@@ -381,7 +386,7 @@ final class PlayerController: ObservableObject {
     }
 
     private func tickVLC() {
-        time = Double(vlc.time.intValue) / 1000
+        time = reported(Double(vlc.time.intValue) / 1000)
         let length = Double(vlc.media?.length.intValue ?? 0) / 1000
         if length > 0 { duration = length }
         playing = vlc.isPlaying
@@ -543,24 +548,53 @@ final class PlayerController: ObservableObject {
         updateNowPlaying()
     }
 
+    /// Repeated taps add up from the last requested position, not from the (not yet updated) player time.
     func skip(_ seconds: Int32) {
-        if engine == .vlc {
-            if seconds >= 0 { vlc.jumpForward(seconds) } else { vlc.jumpBackward(-seconds) }
-        } else {
-            let target = player.currentTime().seconds + Double(seconds)
-            player.seek(to: CMTime(seconds: max(0, target), preferredTimescale: 600))
-        }
-        time = max(0, time + Double(seconds))
+        let from = pendingSeek ?? time
+        var target = max(0, from + Double(seconds))
+        if duration > 0 { target = min(target, max(0, duration - 1)) }
+        seek(to: target, precise: true)
     }
 
     func seek(toFraction fraction: Double) {
-        let value = max(0, min(1, fraction))
+        guard duration > 0 else { return }
+        seek(to: max(0, min(1, fraction)) * duration, precise: true)
+    }
+
+    /// Live preview while the progress bar is dragged: fast keyframe seeks, at most every 150 ms.
+    func scrub(toFraction fraction: Double) {
+        guard duration > 0 else { return }
+        let target = max(0, min(1, fraction)) * duration
+        pendingSeek = target
+        time = target
+        guard Date().timeIntervalSince(lastScrub) > 0.15 else { return }
+        lastScrub = Date()
+        seek(to: target, precise: false)
+    }
+
+    private func seek(to seconds: Double, precise: Bool) {
+        pendingSeek = seconds
+        pendingSeekSince = Date()
+        time = seconds
         if engine == .vlc {
-            vlc.position = Float(value)
-        } else if duration > 0 {
-            player.seek(to: CMTime(seconds: value * duration, preferredTimescale: 600))
+            vlc.time = VLCTime(int: Int32(seconds * 1000))
+        } else {
+            player.currentItem?.cancelPendingSeeks()
+            // Small tolerance: near-instant like external players, without landing far from the target.
+            let tolerance = CMTime(seconds: precise ? 0.5 : 3, preferredTimescale: 600)
+            player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
         }
-        time = value * duration
+        updateNowPlaying()
+    }
+
+    /// Keeps showing the requested position until the engine has actually reached it.
+    private func reported(_ now: Double) -> Double {
+        guard let target = pendingSeek else { return now }
+        if abs(now - target) < 2 || Date().timeIntervalSince(pendingSeekSince) > 6 {
+            pendingSeek = nil
+            return now
+        }
+        return target
     }
 
     func restartFromBeginning() {

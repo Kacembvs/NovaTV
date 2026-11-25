@@ -99,10 +99,9 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 26) {
-                // Same header as Android: NOVA mark with the "NOVA" wordmark next to it.
-                NovaLogo(size: 24)
+                NovaLogo(size: 22)
                     .padding(.horizontal)
-                    .padding(.bottom, -14)
+                    .padding(.bottom, -12)
                 if !network.online {
                     OfflineBanner { openTab(.downloads) }
                 }
@@ -275,7 +274,7 @@ private struct HeroCarousel: View {
             }
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $selection)
-            .frame(height: max(230, style.heroHeight))
+            .frame(height: heroHeight)
             if items.count > 1 {
                 HStack(spacing: 6) {
                     ForEach(Array(items.enumerated()), id: \.element.key) { index, _ in
@@ -294,43 +293,49 @@ private struct HeroCarousel: View {
         }
     }
 
+    private var heroHeight: CGFloat { max(230, style.heroHeight) }
+
     private func slide(_ item: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: min(style.radius, 22))
         let meta = [item.year, item.group, item.rating.flatMap { $0 == "0" || $0.isEmpty ? nil : "★ " + $0 }].compactMap { $0 }
-        return HStack(spacing: 16) {
+        // The text defines the card; the artwork stays a background so it can never push it out of view.
+        return HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 7) {
                 Text(item.kind == .movie ? "FILM" : "SÉRIE").font(.caption.bold()).foregroundStyle(palette.accent)
                 Text(item.name).font(.title3.bold()).foregroundStyle(palette.text).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 if !meta.isEmpty {
                     Text(meta.joined(separator: " · ")).font(.footnote).foregroundStyle(palette.textSecondary).lineLimit(1)
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: 4)
                 HStack(spacing: 8) {
                     watchButton(item)
                     if let route = route(for: item) {
-                        NavigationLink(value: route) { Label("Détails", systemImage: "info.circle") }
+                        NavigationLink(value: route) { Label("Détails", systemImage: "info.circle").lineLimit(1) }
                             .buttonStyle(NovaButtonStyle(prominent: false, compact: true))
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            PosterImage(url: item.logo, title: item.name).frame(width: 104)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            PosterImage(url: item.logo, title: item.name).frame(width: 96)
         }
         .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Background only: a filled image must never widen the slide and push the text off screen.
+        .frame(maxWidth: .infinity)
+        .frame(height: heroHeight)
         .background {
             ZStack {
                 palette.background2
-                AsyncImage(url: item.logo.flatMap(URL.init(string:))) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    Color.clear
+                Color.clear.overlay {
+                    AsyncImage(url: item.logo.flatMap(URL.init(string:))) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Color.clear
+                    }
                 }
+                .clipped()
                 .opacity(0.45)
                 LinearGradient(colors: [palette.background, palette.background.opacity(0.6), .clear], startPoint: .leading, endPoint: .trailing)
             }
-            .clipped()
         }
         .clipShape(shape)
         .overlay(shape.stroke(palette.border, lineWidth: 1))

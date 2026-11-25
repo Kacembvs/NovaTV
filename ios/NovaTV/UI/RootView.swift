@@ -37,8 +37,8 @@ struct SideRail: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 6) {
                 NovaMark()
-                    .frame(width: 52, height: 52)
-                    .padding(.vertical, 4)
+                    .frame(width: 36, height: 36)
+                    .padding(.vertical, 10)
                     .accessibilityHidden(true)
                 ForEach(AppTab.allCases, id: \.self) { item in
                     let selected = item == tab
@@ -197,8 +197,9 @@ struct WelcomeView: View {
 struct NovaMark: View {
     var body: some View {
         Canvas { context, size in
-            let s = min(size.width, size.height) / 108
-            func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: y * s) }
+            // Drawn region of the 108-unit viewport (x 28…89, y 20…80), so no empty margin is wasted.
+            let s = min(size.width / 61, size.height / 60)
+            func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: (x - 28) * s, y: (y - 20) * s) }
             var tile = Path()
             tile.move(to: p(30, 30))
             tile.addLine(to: p(66, 30))
@@ -231,11 +232,13 @@ struct NovaLogo: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 0) {
-            NovaMark().frame(width: size * 2, height: size * 2)
+        HStack(spacing: size * 0.25) {
+            NovaMark().frame(width: size * 1.25, height: size * 1.25)
             Text("NOVA").font(.system(size: size, weight: .bold)).tracking(size / 8).foregroundStyle(palette.text)
-                .lineLimit(1).fixedSize()
+                .lineLimit(1)
+                .fixedSize()
         }
+        .fixedSize()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("NOVA")
     }
