@@ -28,6 +28,22 @@ final class SettingsBackupTests: XCTestCase {
      "ratings":[],"customGroups":[]}
     """
 
+    /// The unsigned simulator build used by CI has no Keychain access; signed apps on the iPhone do.
+    private var keychainAvailable: Bool {
+        Keychain.set("probe", for: "nova-test-probe")
+        defer { Keychain.set(nil, for: "nova-test-probe") }
+        return Keychain.get("nova-test-probe") == "probe"
+    }
+
+    func testAndroidSealedPasswordsAreDecryptedWithTheBackupCode() throws {
+        let key = try BackupManager.deriveKey("1234", salt: try XCTUnwrap(Data(base64Encoded: "AAECAwQFBgcICQoLDA0ODw==")))
+        XCTAssertEqual(try BackupManager.open(key, "ZGVmZ2hpamtsbW5vRdKjNf2tuiypAqo0NcMW2/7vNWF/781WoX7cPg=="), "motdepasse-é")
+        XCTAssertEqual(try BackupManager.open(key, "ZGVmZ2hpamtsbW5vZvKBEObGPjDc2l/QttERNkW/8WA="), "NOVA")
+        XCTAssertEqual(try BackupManager.open(key, try BackupManager.seal(key, "aller-retour")), "aller-retour")
+        let wrong = try BackupManager.deriveKey("0000", salt: try XCTUnwrap(Data(base64Encoded: "AAECAwQFBgcICQoLDA0ODw==")))
+        XCTAssertThrowsError(try BackupManager.open(wrong, "ZGVmZ2hpamtsbW5vZvKBEObGPjDc2l/QttERNkW/8WA="))
+    }
+
     func testAndroidBackupRestoresProfilesPasswordsLibraryAndSettings() throws {
         let context = try makeContext()
         let settings = makeSettings()
@@ -47,7 +63,7 @@ final class SettingsBackupTests: XCTestCase {
         defer { Keychain.set(nil, for: profile.id.uuidString) }
         XCTAssertEqual(profile.type, .xtream)
         XCTAssertEqual(profile.username, "jean")
-        XCTAssertEqual(Keychain.password(for: profile), "motdepasse-é")
+        if keychainAvailable { XCTAssertEqual(Keychain.password(for: profile), "motdepasse-é") }
         // Android's raw TS live reference becomes the HLS one iOS plays.
         XCTAssertNotNil(context.favorite(profile.id, "live/12.m3u8"))
         XCTAssertEqual(context.history(profile.id, "movie/3.mkv")?.position, 60)
@@ -69,7 +85,7 @@ final class SettingsBackupTests: XCTestCase {
         let copy = try BackupManager.restore(exported, code: "9876", context: other, settings: makeSettings())
         let restored = try XCTUnwrap(copy.newProfiles.first)
         defer { Keychain.set(nil, for: restored.id.uuidString) }
-        XCTAssertEqual(Keychain.password(for: restored), "motdepasse-é")
+        if keychainAvailable { XCTAssertEqual(Keychain.password(for: restored), "motdepasse-é") }
         XCTAssertNotNil(other.favorite(restored.id, "live/12.m3u8"))
     }
 
