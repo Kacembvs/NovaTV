@@ -166,6 +166,7 @@ struct DownloadsView: View {
                 .listRowBackground(palette.card)
             }
         }
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(palette.background.ignoresSafeArea())
         .navigationTitle("Téléchargements")

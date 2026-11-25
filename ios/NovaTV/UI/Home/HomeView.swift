@@ -227,8 +227,7 @@ private struct QuickTiles: View {
             }
             .foregroundStyle(palette.text)
             .frame(maxWidth: .infinity, minHeight: 72)
-            .background(palette.card, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border))
+            .novaCard(padding: 0)
         }
         .buttonStyle(.plain)
     }
@@ -239,6 +238,7 @@ private struct HeroCarousel: View {
     let items: [Content]
     let profile: Profile
     @Environment(\.palette) private var palette
+    @Environment(\.novaStyle) private var style
     @State private var selection = 0
     @State private var lastInteraction = Date()
     private let timer = Timer.publish(every: 9, on: .main, in: .common).autoconnect()
@@ -262,7 +262,7 @@ private struct HeroCarousel: View {
                             NavigationLink(value: route) {
                                 Label("Découvrir", systemImage: "info.circle")
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.novaPrimary)
                         }
                     }
                     .padding()
@@ -271,8 +271,8 @@ private struct HeroCarousel: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .always))
-        .frame(height: 380)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .frame(height: style.heroHeight)
+        .novaClip()
         .padding(.horizontal)
         .onChange(of: selection) { _, _ in lastInteraction = .now }
         .onReceive(timer) { _ in
@@ -294,7 +294,7 @@ struct StatusBanner: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        .novaCard(padding: 0)
         .padding(.horizontal)
     }
 }
@@ -311,10 +311,10 @@ struct OfflineBanner: View {
                 Text("Vos téléchargements restent disponibles.").font(.caption).foregroundStyle(palette.textSecondary)
             }
             Spacer()
-            Button("Ouvrir", action: onOpen).buttonStyle(.borderedProminent)
+            Button("Ouvrir", action: onOpen).buttonStyle(.novaPrimary)
         }
         .padding(12)
-        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        .novaCard(padding: 0)
         .padding(.horizontal)
     }
 }

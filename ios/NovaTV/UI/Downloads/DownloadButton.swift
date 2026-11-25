@@ -39,12 +39,11 @@ struct DownloadButton: View {
                         .foregroundStyle(record?.state == .completed ? palette.accent2 : (record?.state == .failed ? .red : palette.text))
                 }
                 .frame(width: 30, height: 30)
-                .frame(width: 44, height: 44)
             } else {
                 Label(label, systemImage: icon)
             }
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(NovaButtonStyle(prominent: false, compact: compact))
         .accessibilityLabel(compact ? "\(label) · \(item.subtitle ?? item.title)" : label)
         .confirmationDialog(item.subtitle ?? item.title, isPresented: $showChoices, titleVisibility: .visible) {
             if let record {

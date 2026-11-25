@@ -99,7 +99,7 @@ struct MovieDetailView: View {
             } label: {
                 Label(playTitle, systemImage: "play.fill").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.novaPrimary)
             .controlSize(.large)
             if resumable, let saved {
                 ProgressView(value: saved.progress).tint(palette.accent)
@@ -108,7 +108,7 @@ struct MovieDetailView: View {
                 } label: {
                     Label("Recommencer", systemImage: "gobackward").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.novaSecondary)
             }
             HStack {
                 FavoriteButton(profileID: profile.id, item: item)
@@ -245,7 +245,7 @@ struct SeriesDetailView: View {
                 } else if let error {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Impossible de charger les épisodes : \(error)").foregroundStyle(.red)
-                        Button("Réessayer") { Task { await load() } }.buttonStyle(.bordered)
+                        Button("Réessayer") { Task { await load() } }.buttonStyle(.novaSecondary)
                         NavigationLink(value: Route.downloads) { Label("Voir mes téléchargements", systemImage: "arrow.down.circle") }
                     }
                     .padding(.horizontal)
@@ -278,7 +278,7 @@ struct SeriesDetailView: View {
                     } label: {
                         Label(watched.isEmpty ? "Lecture" : "Continuer", systemImage: "play.fill")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.novaPrimary)
                 }
                 Spacer()
                 if seasons.count > 1 {
@@ -298,7 +298,7 @@ struct SeriesDetailView: View {
                 } label: {
                     Label("Télécharger la saison \(current ?? 0) (\(list.count) épisodes)", systemImage: "arrow.down.circle")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.novaSecondary)
             }
             ForEach(list) { episode in
                 let entry = watched[episode.ref]
@@ -317,7 +317,7 @@ struct SeriesDetailView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
-                        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                        .novaCard(padding: 0)
                     }
                     .buttonStyle(.plain)
                     DownloadButton(profile: profile, item: item(episode, cover: cover), season: episode.season, episode: episode.number, compact: true)

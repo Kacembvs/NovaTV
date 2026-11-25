@@ -38,19 +38,11 @@ struct CatalogView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(visible) { category in
-                        let isSelected = (selected ?? visible.first?.name) == category.name
-                        Button { selected = category.name } label: {
-                            Text(category.name).lineLimit(1)
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .foregroundStyle(isSelected ? (palette.isLight ? .white : palette.background) : palette.text)
-                                .background(isSelected ? palette.accent : palette.card, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
+                        NovaChip(title: category.name, selected: (selected ?? visible.first?.name) == category.name) { selected = category.name }
                     }
                     if categories.count > visible.count {
                         Button { askPin = true } label: { Label("\(categories.count - visible.count) masquée(s)", systemImage: "lock.fill") }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.novaSecondary)
                     }
                 }
                 .padding(.horizontal)
@@ -97,6 +89,7 @@ struct CategoryGrid: View {
     let kind: ContentKind
     let group: String
     @Environment(\.palette) private var palette
+    @Environment(\.novaStyle) private var style
     @Query private var items: [Content]
     @State private var sort = CatalogSort.provider
     @State private var filter = ""
@@ -140,11 +133,11 @@ struct CategoryGrid: View {
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 160), spacing: 12)], spacing: 18) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: style.landscapeCards ? 160 : 104, maximum: style.landscapeCards ? 260 : 160), spacing: 12)], spacing: 18) {
                 ForEach(shown) { item in
                     if let route = route(for: item) {
                         NavigationLink(value: route) {
-                            PosterCard(title: item.name, image: item.logo, subtitle: Self.subtitle(item), width: nil)
+                            PosterCard(title: item.name, image: item.logo, subtitle: Self.subtitle(item), width: nil, aspect: style.landscapeCards ? 16 / 9 : 2 / 3)
                         }
                         .buttonStyle(.plain)
                     }

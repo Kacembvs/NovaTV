@@ -62,6 +62,8 @@ struct NovaApp: App {
                 .environmentObject(downloads)
                 .environmentObject(playback)
                 .environment(\.palette, settings.palette)
+                .environment(\.novaStyle, settings.style)
+                .toggleStyle(NovaSwitchStyle())
                 .tint(settings.palette.accent)
                 .preferredColorScheme(settings.palette.isLight ? .light : .dark)
                 .onAppear {

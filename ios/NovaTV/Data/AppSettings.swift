@@ -1,19 +1,118 @@
+import CryptoKit
 import Foundation
 import SwiftUI
-import CryptoKit
+
+/// How NOVA plays video internally.
+enum InternalEngine: String, CaseIterable, Identifiable {
+    /// Apple's player (PiP, AirPlay), and the built-in VLC engine for MKV, AVI… or when Apple fails.
+    case automatic
+    /// Built-in VLC engine for everything.
+    case vlc
+    var id: String { rawValue }
+    var label: String { self == .automatic ? "Automatique (Apple + VLC intégré)" : "Toujours le moteur VLC intégré" }
+}
 
 enum PlayerChoice: String, CaseIterable, Identifiable {
     case nova, vlc, outplayer, infuse
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .nova: return "NOVA (lecteur Apple)"
-        case .vlc: return "VLC"
-        case .outplayer: return "Outplayer"
-        case .infuse: return "Infuse"
+        case .nova: return "Lecteur NOVA (interne)"
+        case .vlc: return "Application VLC"
+        case .outplayer: return "Application Outplayer"
+        case .infuse: return "Application Infuse"
         }
     }
     var external: ExternalPlayer? { ExternalPlayer(rawValue: rawValue) }
+}
+
+/// Same identifiers as Android (`NovaThemeId`), so backups move between devices.
+enum PaletteID: String, CaseIterable, Identifiable {
+    case novaBlue = "NOVA_BLUE", cinemaGold = "CINEMA_GOLD", streamRed = "STREAM_RED", pureLight = "PURE_LIGHT",
+         custom = "CUSTOM", monochrome = "MONOCHROME"
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .novaBlue: return "NOVA Blue"
+        case .cinemaGold: return "Cinema Gold"
+        case .streamRed: return "Stream Red"
+        case .pureLight: return "Pure Light"
+        case .custom: return "Personnalisé"
+        case .monochrome: return "NOVA+ Noir et blanc"
+        }
+    }
+}
+
+/// Same interfaces as Android (`TvInterface`): layout choices applied on top of a palette.
+enum NovaStyle: String, CaseIterable, Identifiable {
+    case classic = "CLASSIC", cinema = "CINEMA", studios = "STUDIOS", antenna = "ANTENNA", discovery = "DISCOVERY",
+         guide = "GUIDE", plus = "PLUS"
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .classic: return "NOVA Classique"
+        case .cinema: return "NOVA Cinéma"
+        case .studios: return "NOVA Univers"
+        case .antenna: return "NOVA Antenne"
+        case .discovery: return "NOVA Horizon"
+        case .guide: return "NOVA Guide"
+        case .plus: return "NOVA+"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .classic: return "L'interface actuelle, conservée comme repère."
+        case .cinema: return "Grande scène, rail discret et affiches de cinéma."
+        case .studios: return "Collections et grandes affiches."
+        case .antenna: return "Direct prioritaire et cartes de programmes."
+        case .discovery: return "Reprises en tête et découverte en cartes larges."
+        case .guide: return "Listes IPTV détaillées et compactes."
+        case .plus: return "Noir et blanc, angles droits, direct et collections."
+        }
+    }
+
+    /// Corner radius of cards, buttons and panels (Android `cardRadius`).
+    var radius: CGFloat {
+        switch self {
+        case .classic: return 14
+        case .cinema: return 6
+        case .studios: return 20
+        case .antenna: return 12
+        case .discovery: return 10
+        case .guide: return 4
+        case .plus: return 2
+        }
+    }
+
+    var defaultPalette: PaletteID {
+        switch self {
+        case .cinema: return .streamRed
+        case .antenna: return .cinemaGold
+        case .plus: return .monochrome
+        default: return .novaBlue
+        }
+    }
+
+    /// Catalogue cards are landscape in Antenne / Horizon, like on Android.
+    var landscapeCards: Bool { self == .antenna || self == .discovery }
+    var heroHeight: CGFloat {
+        switch self {
+        case .cinema: return 440
+        case .guide: return 280
+        case .antenna: return 320
+        default: return 380
+        }
+    }
+    /// Live first on the home screen.
+    var liveFirst: Bool { self == .antenna || self == .guide || self == .plus }
+}
+
+let preferredLanguageCodes = ["fr", "en", "ar", "es", "de", "it", "pt", "tr"]
+
+func languageName(_ code: String) -> String {
+    Locale(identifier: "fr_FR").localizedString(forLanguageCode: code)?.capitalized ?? code
 }
 
 /// All user preferences, persisted in UserDefaults and observed by the UI.
@@ -22,11 +121,22 @@ final class AppSettings: ObservableObject {
     private let defaults: UserDefaults
 
     @Published var activeProfileID: UUID? { didSet { defaults.set(activeProfileID?.uuidString, forKey: "activeProfile") } }
-    @Published var paletteID: String { didSet { defaults.set(paletteID, forKey: "palette") } }
+    @Published var paletteID: PaletteID { didSet { defaults.set(paletteID.rawValue, forKey: "paletteID") } }
+    @Published var customAccent: UInt32 { didSet { defaults.set(Int(customAccent), forKey: "customAccent") } }
+    @Published var style: NovaStyle { didSet { defaults.set(style.rawValue, forKey: "style") } }
+
     @Published var preferredPlayer: PlayerChoice { didSet { defaults.set(preferredPlayer.rawValue, forKey: "player") } }
-    /// Used for formats Apple's player cannot read (MKV, AVI…).
-    @Published var fallbackPlayer: ExternalPlayer { didSet { defaults.set(fallbackPlayer.rawValue, forKey: "fallbackPlayer") } }
+    @Published var internalEngine: InternalEngine { didSet { defaults.set(internalEngine.rawValue, forKey: "engine") } }
     @Published var autoplayNext: Bool { didSet { defaults.set(autoplayNext, forKey: "autoplay") } }
+    @Published var countdownSeconds: Int { didSet { defaults.set(countdownSeconds, forKey: "countdown") } }
+    @Published var gesturesEnabled: Bool { didSet { defaults.set(gesturesEnabled, forKey: "gestures") } }
+    @Published var freeRotation: Bool { didSet { defaults.set(freeRotation, forKey: "freeRotation") } }
+    @Published var pictureInPicture: Bool { didSet { defaults.set(pictureInPicture, forKey: "pip") } }
+
+    @Published var audioLanguage: String? { didSet { defaults.set(audioLanguage, forKey: "langAudio") } }
+    @Published var subtitleLanguage: String? { didSet { defaults.set(subtitleLanguage, forKey: "langSubtitles") } }
+    @Published var autoRefresh: Bool { didSet { defaults.set(autoRefresh, forKey: "autoRefresh") } }
+
     @Published var downloadWifiOnly: Bool { didSet { defaults.set(downloadWifiOnly, forKey: "dlWifi") } }
     @Published var smartDownloads: Bool { didSet { defaults.set(smartDownloads, forKey: "dlSmart") } }
 
@@ -38,22 +148,45 @@ final class AppSettings: ObservableObject {
     /// Protected content shown until the app is relocked (not persisted).
     @Published var parentalUnlocked = false
 
+    static let countdownChoices = [5, 10, 15, 20]
+    static let customAccents: [UInt32] = [0x43D5FF, 0x8257FF, 0x2ED47A, 0xFF8A3D, 0xFF4FA3, 0xE8C45C, 0xFF4D5A, 0xB0BEC5]
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        func bool(_ key: String, _ fallback: Bool) -> Bool { defaults.object(forKey: key) as? Bool ?? fallback }
         activeProfileID = defaults.string(forKey: "activeProfile").flatMap(UUID.init(uuidString:))
-        paletteID = defaults.string(forKey: "palette") ?? Palette.novaBlue.id
+        // First versions stored lowercase palette names.
+        let legacy = ["nova_blue": PaletteID.novaBlue, "stream_red": .streamRed, "monochrome": .monochrome,
+                      "cinema_gold": .cinemaGold, "pure_light": .pureLight, "nova_violet": .novaBlue]
+        paletteID = PaletteID(rawValue: defaults.string(forKey: "paletteID") ?? "")
+            ?? legacy[defaults.string(forKey: "palette") ?? ""] ?? .novaBlue
+        customAccent = UInt32(defaults.object(forKey: "customAccent") as? Int ?? Int(Self.customAccents[0]))
+        style = NovaStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .classic
         preferredPlayer = PlayerChoice(rawValue: defaults.string(forKey: "player") ?? "") ?? .nova
-        fallbackPlayer = ExternalPlayer(rawValue: defaults.string(forKey: "fallbackPlayer") ?? "") ?? .vlc
-        autoplayNext = defaults.object(forKey: "autoplay") as? Bool ?? true
-        downloadWifiOnly = defaults.object(forKey: "dlWifi") as? Bool ?? true
-        smartDownloads = defaults.object(forKey: "dlSmart") as? Bool ?? true
+        internalEngine = InternalEngine(rawValue: defaults.string(forKey: "engine") ?? "") ?? .automatic
+        autoplayNext = bool("autoplay", true)
+        countdownSeconds = defaults.object(forKey: "countdown") as? Int ?? 20
+        gesturesEnabled = bool("gestures", true)
+        freeRotation = bool("freeRotation", false)
+        pictureInPicture = bool("pip", true)
+        audioLanguage = defaults.string(forKey: "langAudio")
+        subtitleLanguage = defaults.string(forKey: "langSubtitles")
+        autoRefresh = bool("autoRefresh", true)
+        downloadWifiOnly = bool("dlWifi", true)
+        smartDownloads = bool("dlSmart", true)
         pinHash = defaults.string(forKey: "pinHash")
         pinSalt = defaults.string(forKey: "pinSalt")
         lockedGroups = Set(defaults.stringArray(forKey: "lockedGroups") ?? [])
         lockSettings = defaults.bool(forKey: "lockSettings")
     }
 
-    var palette: Palette { Palette.all.first { $0.id == paletteID } ?? .novaBlue }
+    var palette: Palette { Palette.of(paletteID, customAccent: customAccent) }
+
+    /// Choosing an interface also applies its colours, like on Android; the palette can be changed afterwards.
+    func applyStyle(_ newStyle: NovaStyle) {
+        style = newStyle
+        paletteID = newStyle.defaultPalette
+    }
 
     // MARK: Parental control
 
@@ -106,9 +239,8 @@ final class AppSettings: ObservableObject {
     var settingsBlocked: Bool { pinSet && lockSettings && !parentalUnlocked }
 }
 
-struct Palette: Identifiable, Equatable {
-    let id: String
-    let name: String
+struct Palette: Equatable {
+    let id: PaletteID
     let background: Color
     let background2: Color
     let card: Color
@@ -117,34 +249,63 @@ struct Palette: Identifiable, Equatable {
     let text: Color
     let textSecondary: Color
     let border: Color
+    let error: Color
     let isLight: Bool
+    /// Luminance of the accent, used to pick readable text on accent surfaces.
+    let accentLuminance: Double
 
-    static let novaBlue = Palette(id: "nova_blue", name: "NOVA Blue",
-                                  background: Color(hex: 0x080D18), background2: Color(hex: 0x101829), card: Color(hex: 0x172238),
-                                  accent: Color(hex: 0x258BFF), accent2: Color(hex: 0x43D5FF), text: .white,
-                                  textSecondary: Color(hex: 0xA5B1C5), border: Color(hex: 0x27344A), isLight: false)
-    static let cinema = Palette(id: "stream_red", name: "NOVA Cinéma",
-                                background: Color(hex: 0x0B0B0B), background2: Color(hex: 0x161616), card: Color(hex: 0x222222),
-                                accent: Color(hex: 0xE50914), accent2: Color(hex: 0xFF5A5F), text: .white,
-                                textSecondary: Color(hex: 0xB3B3B3), border: Color(hex: 0x333333), isLight: false)
-    static let plus = Palette(id: "monochrome", name: "NOVA+ Noir et blanc",
-                              background: Color(hex: 0x080808), background2: Color(hex: 0x141414), card: Color(hex: 0x202020),
-                              accent: .white, accent2: Color(hex: 0xD0D0D0), text: .white,
-                              textSecondary: Color(hex: 0xB5B5B5), border: Color(hex: 0x404040), isLight: false)
-    static let gold = Palette(id: "cinema_gold", name: "Cinema Gold",
-                              background: Color(hex: 0x0C0A06), background2: Color(hex: 0x17130B), card: Color(hex: 0x231C10),
-                              accent: Color(hex: 0xE3B341), accent2: Color(hex: 0xF5D78E), text: .white,
-                              textSecondary: Color(hex: 0xC2B49A), border: Color(hex: 0x3A3020), isLight: false)
-    static let violet = Palette(id: "nova_violet", name: "NOVA Univers",
-                                background: Color(hex: 0x0A0820), background2: Color(hex: 0x14113A), card: Color(hex: 0x1E1A52),
-                                accent: Color(hex: 0x8257FF), accent2: Color(hex: 0x43D5FF), text: .white,
-                                textSecondary: Color(hex: 0xB1AACF), border: Color(hex: 0x2E2870), isLight: false)
-    static let light = Palette(id: "pure_light", name: "Pure Light",
-                               background: Color(hex: 0xF5F7FB), background2: .white, card: .white,
-                               accent: Color(hex: 0x1F6FEB), accent2: Color(hex: 0x0EA5E9), text: Color(hex: 0x0F172A),
-                               textSecondary: Color(hex: 0x5B6475), border: Color(hex: 0xD8DEE9), isLight: true)
+    var name: String { id.label }
+    /// Text and icons drawn on top of the accent colour (black on NOVA+ white buttons).
+    var onAccent: Color { accentLuminance > 0.55 ? Color(hex: 0x0A0A0A) : .white }
+    /// Selected chips/segments: the accent unless it would vanish on the light palette.
+    var selection: Color { accent }
 
-    static let all: [Palette] = [novaBlue, cinema, plus, violet, gold, light]
+    init(id: PaletteID, background: UInt32, background2: UInt32, card: UInt32, accent: UInt32, accent2: UInt32,
+         text: UInt32, textSecondary: UInt32, border: UInt32, error: UInt32, isLight: Bool = false) {
+        self.id = id
+        self.background = Color(hex: background)
+        self.background2 = Color(hex: background2)
+        self.card = Color(hex: card)
+        self.accent = Color(hex: accent)
+        self.accent2 = Color(hex: accent2)
+        self.text = Color(hex: text)
+        self.textSecondary = Color(hex: textSecondary)
+        self.border = Color(hex: border)
+        self.error = Color(hex: error)
+        self.isLight = isLight
+        accentLuminance = Self.luminance(accent)
+    }
+
+    static func luminance(_ hex: UInt32) -> Double {
+        func channel(_ v: UInt32) -> Double {
+            let c = Double(v) / 255
+            return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel((hex >> 16) & 0xFF) + 0.7152 * channel((hex >> 8) & 0xFF) + 0.0722 * channel(hex & 0xFF)
+    }
+
+    static func of(_ id: PaletteID, customAccent: UInt32 = AppSettings.customAccents[0]) -> Palette {
+        switch id {
+        case .novaBlue:
+            return Palette(id: id, background: 0x080D18, background2: 0x101829, card: 0x172238, accent: 0x258BFF, accent2: 0x43D5FF,
+                           text: 0xFFFFFF, textSecondary: 0xA5B1C5, border: 0x27344A, error: 0xFF6B7A)
+        case .cinemaGold:
+            return Palette(id: id, background: 0x0B0A08, background2: 0x15130F, card: 0x221E17, accent: 0xD4A63A, accent2: 0xE8C45C,
+                           text: 0xFFF8E8, textSecondary: 0xBDB29A, border: 0x3A3326, error: 0xFF6B6B)
+        case .streamRed:
+            return Palette(id: id, background: 0x0A0A0B, background2: 0x141416, card: 0x202024, accent: 0xE50914, accent2: 0xFF4D5A,
+                           text: 0xFFFFFF, textSecondary: 0xB3B3B8, border: 0x34343A, error: 0xFF8A65)
+        case .monochrome:
+            return Palette(id: id, background: 0x080808, background2: 0x141414, card: 0x202020, accent: 0xFFFFFF, accent2: 0xD0D0D0,
+                           text: 0xFFFFFF, textSecondary: 0xB5B5B5, border: 0x404040, error: 0xFF6B6B)
+        case .pureLight:
+            return Palette(id: id, background: 0xF5F7FB, background2: 0xFFFFFF, card: 0xE9EEF6, accent: 0x0A72D9, accent2: 0x6A3FE0,
+                           text: 0x0E1525, textSecondary: 0x55627A, border: 0xCCD5E3, error: 0xD32F45, isLight: true)
+        case .custom:
+            return Palette(id: id, background: 0x080D18, background2: 0x101829, card: 0x172238, accent: customAccent, accent2: 0x8257FF,
+                           text: 0xFFFFFF, textSecondary: 0xA5B1C5, border: 0x27344A, error: 0xFF6B7A)
+        }
+    }
 }
 
 extension Color {
@@ -154,12 +315,21 @@ extension Color {
 }
 
 private struct PaletteKey: EnvironmentKey {
-    static let defaultValue = Palette.novaBlue
+    static let defaultValue = Palette.of(.novaBlue)
+}
+
+private struct StyleKey: EnvironmentKey {
+    static let defaultValue = NovaStyle.classic
 }
 
 extension EnvironmentValues {
     var palette: Palette {
         get { self[PaletteKey.self] }
         set { self[PaletteKey.self] = newValue }
+    }
+
+    var novaStyle: NovaStyle {
+        get { self[StyleKey.self] }
+        set { self[StyleKey.self] = newValue }
     }
 }

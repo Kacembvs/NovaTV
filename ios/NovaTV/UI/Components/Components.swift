@@ -6,6 +6,7 @@ struct PosterImage: View {
     let title: String
     var aspect: CGFloat = 2.0 / 3.0
     @Environment(\.palette) private var palette
+    @Environment(\.novaStyle) private var style
 
     var body: some View {
         Color.clear
@@ -24,7 +25,7 @@ struct PosterImage: View {
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: style.radius))
     }
 }
 
@@ -90,7 +91,7 @@ struct EmptyStateView: View {
             Text(message)
         } actions: {
             if let actionTitle, let action {
-                Button(actionTitle, action: action).buttonStyle(.borderedProminent)
+                Button(actionTitle, action: action).buttonStyle(.novaPrimary)
             }
         }
     }
@@ -116,7 +117,7 @@ struct FavoriteButton: View {
         } label: {
             Label(isFavorite ? "Dans ma liste" : "Ma liste", systemImage: isFavorite ? "checkmark" : "plus")
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.novaSecondary)
         .accessibilityLabel(isFavorite ? "Retirer de ma liste" : "Ajouter à ma liste")
     }
 }
@@ -127,36 +128,60 @@ struct PinSheet: View {
     let message: String?
     let verify: (String) -> String?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.palette) private var palette
+    @Environment(\.novaStyle) private var style
     @State private var pin = ""
     @State private var error: String?
     @FocusState private var focused: Bool
 
     var body: some View {
-        NavigationStack {
-            Form {
-                if let message { Text(message).foregroundStyle(.secondary) }
-                SecureField("Code PIN (4 chiffres)", text: $pin)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text(title).font(.title3.bold()).foregroundStyle(palette.text)
+                Spacer()
+                Button("Annuler") { dismiss() }.buttonStyle(.novaCompact)
+            }
+            if let message { Text(message).foregroundStyle(palette.textSecondary) }
+            HStack(spacing: 12) {
+                ForEach(0..<4, id: \.self) { index in
+                    let filled = index < pin.count
+                    RoundedRectangle(cornerRadius: style.radius)
+                        .stroke(filled ? palette.accent : palette.border, lineWidth: 2)
+                        .frame(width: 52, height: 60)
+                        .overlay(Circle().fill(palette.text).frame(width: 12, height: 12).opacity(filled ? 1 : 0))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture { focused = true }
+            .overlay {
+                SecureField("", text: $pin)
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
                     .focused($focused)
-                    .onChange(of: pin) { _, value in
-                        pin = String(value.filter(\.isNumber).prefix(4))
-                        if pin.count == 4 { submit() }
-                    }
-                if let error { Text(error).foregroundStyle(.red) }
+                    .opacity(0.02)
+                    .accessibilityLabel("Code PIN à 4 chiffres")
             }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Valider", action: submit).disabled(pin.count != 4) }
-            }
-            .onAppear { focused = true }
+            if let error { Text(error).foregroundStyle(palette.error) }
+            Button("Valider", action: submit)
+                .buttonStyle(.novaPrimary)
+                .frame(maxWidth: .infinity)
+                .disabled(pin.count != 4)
+            Spacer(minLength: 0)
         }
+        .padding(24)
+        .background(palette.background2.ignoresSafeArea())
+        .onChange(of: pin) { _, value in
+            let digits = String(value.filter(\.isNumber).prefix(4))
+            if digits != pin { pin = digits }
+            if digits.count == 4 { submit() }
+        }
+        .onAppear { focused = true }
         .presentationDetents([.medium])
     }
 
     private func submit() {
+        guard pin.count == 4 else { return }
         if let message = verify(pin) {
             error = message
             pin = ""

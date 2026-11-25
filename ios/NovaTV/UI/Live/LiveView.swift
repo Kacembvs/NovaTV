@@ -28,7 +28,7 @@ struct LiveView: View {
                     ForEach(visible) { category in chip(category.name, count: category.count) }
                     if hiddenCount > 0 {
                         Button { askPin = true } label: { Label("\(hiddenCount) masquée(s)", systemImage: "lock.fill") }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.novaSecondary)
                     }
                 }
                 .padding(.horizontal)
@@ -55,20 +55,7 @@ struct LiveView: View {
     }
 
     private func chip(_ name: String, count: Int?) -> some View {
-        let isSelected = (selected ?? visible.first?.name) == name
-        return Button { selected = name } label: {
-            HStack(spacing: 4) {
-                Text(name).lineLimit(1)
-                if let count { Text("\(count)").font(.caption2).foregroundStyle(isSelected ? palette.background : palette.textSecondary) }
-            }
-            .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .foregroundStyle(isSelected ? (palette.isLight ? .white : palette.background) : palette.text)
-            .background(isSelected ? palette.accent : palette.card, in: Capsule())
-            .overlay(Capsule().stroke(palette.border, lineWidth: isSelected ? 0 : 1))
-        }
-        .buttonStyle(.plain)
+        NovaChip(title: name, count: count, selected: (selected ?? visible.first?.name) == name) { selected = name }
     }
 }
 
@@ -134,8 +121,7 @@ struct ChannelRow: View {
                 Text(String(channel.name.prefix(2)).uppercased()).font(.caption.bold()).foregroundStyle(palette.textSecondary)
             }
             .frame(width: 64, height: 40)
-            .padding(4)
-            .background(palette.card, in: RoundedRectangle(cornerRadius: 8))
+            .novaCard(padding: 4)
             VStack(alignment: .leading, spacing: 3) {
                 Text(channel.name).font(.subheadline.weight(.semibold)).foregroundStyle(palette.text).lineLimit(1)
                 if let now = schedule.now {
@@ -242,6 +228,7 @@ struct ChannelGuideSheet: View {
                     }
                 }
             }
+            .listStyle(.plain)
             .navigationTitle(channel.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

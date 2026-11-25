@@ -216,9 +216,17 @@ reprise de lecture, guide TV, téléchargements hors ligne, thèmes NOVA et cont
 parental.
 
 - **Lecteur** : lecteur Apple (Picture-in-Picture, AirPlay, pistes audio/sous-titres,
-  vitesse, écran de verrouillage) avec reprise, épisode suivant automatique, zapping
-  et minuteur de sommeil. « Ouvrir avec » VLC, Outplayer ou Infuse, et lecteur par
-  défaut au choix. Les MKV/AVI, non lus par Apple, s'ouvrent dans le lecteur choisi.
+  vitesse, écran de verrouillage) et **moteur VLC intégré** (MobileVLCKit 3.6) pour
+  MKV, AVI, TS, WMV… avec commandes NOVA (±10 s, double appui, pistes, vitesse).
+  Bascule automatique vers VLC si le lecteur Apple échoue ; bascule manuelle dans « … ».
+  Reprise, épisode suivant automatique, zapping, minuteur de sommeil, langues préférées.
+  « Ouvrir avec » VLC, Outplayer ou Infuse, et lecteur par défaut au choix.
+- **Réglages** : mêmes sections qu'Android (Profils, Lecture, Téléchargements, Langues,
+  Apparence, Contrôle parental, Sauvegarde) ; barre latérale en paysage et sur iPad.
+  Les sept interfaces NOVA (NOVA+, Cinéma…) appliquent couleurs et angles (droits sur
+  NOVA+) ; textes et interrupteurs restent lisibles sur les accents blancs.
+- **Sauvegarde** : même fichier que sur Android (code facultatif, PBKDF2 + AES-GCM) :
+  une sauvegarde Android se restaure sur iPhone et inversement.
 - **Compilation** : le workflow `.github/workflows/ios.yml` (runner macOS) génère le
   projet avec XcodeGen, lance les tests unitaires puis publie une IPA **non signée** :
   https://github.com/Kacembvs/NovaTV/releases/download/latest-ios/nova-ios-unsigned.ipa

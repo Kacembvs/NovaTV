@@ -49,10 +49,8 @@ struct RootView: View {
             if let owner = context.profile(request.profileID) {
                 PlayerScreen(request: request, profile: owner, context: context, settings: settings, downloads: downloads)
                     .environmentObject(settings)
+                    .environment(\.novaStyle, settings.style)
             }
-        }
-        .sheet(item: Binding(get: { playback.shareFile.map(IdentifiedURL.init) }, set: { playback.shareFile = $0?.url })) { file in
-            ShareSheet(url: file.url)
         }
         .alert("Lecture", isPresented: Binding(get: { playback.message != nil }, set: { if !$0 { playback.message = nil } })) {
             Button("OK", role: .cancel) {}
@@ -65,8 +63,12 @@ struct RootView: View {
         if settings.activeProfileID != profile.id { settings.activeProfileID = profile.id }
         epg.load(profile)
         if profile.lastSyncAt == nil && !sync.isRunning(profile.id) { sync.sync(profile) }
-        // Guides older than 12 hours are refreshed in the background.
-        if profile.lastSyncAt != nil, (profile.epgSyncedAt ?? .distantPast) < Date().addingTimeInterval(-12 * 3600), !epg.loading {
+        guard settings.autoRefresh, let synced = profile.lastSyncAt else { return }
+        let stale = Date().addingTimeInterval(-12 * 3600)
+        // Like Android's 12 h background refresh: catalogue (which then reloads the guide) or guide alone.
+        if synced < stale, !sync.isRunning(profile.id) {
+            sync.sync(profile)
+        } else if (profile.epgSyncedAt ?? .distantPast) < stale, !epg.loading {
             Task { await epg.refresh(profile) }
         }
     }
@@ -88,7 +90,7 @@ struct WelcomeView: View {
             Button(action: onAdd) {
                 Label("Ajouter un profil", systemImage: "plus").frame(maxWidth: 280).padding(.vertical, 6)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.novaPrimary)
             .controlSize(.large)
             Spacer()
             Text("NOVA ne fournit aucun contenu : utilisez uniquement des sources auxquelles vous avez droit.")
