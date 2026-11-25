@@ -99,6 +99,10 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 26) {
+                // Same header as Android: NOVA mark with the "NOVA" wordmark next to it.
+                NovaLogo(size: 24)
+                    .padding(.horizontal)
+                    .padding(.bottom, -14)
                 if !network.online {
                     OfflineBanner { openTab(.downloads) }
                 }
@@ -148,9 +152,6 @@ struct HomeView: View {
             .padding(.vertical)
         }
         .background(palette.background.ignoresSafeArea())
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) { NovaLogo(size: 20) }
-        }
         .novaToolbar()
         .navigationBarTitleDisplayMode(.inline)
         .novaDestinations(profile: profile)
@@ -296,37 +297,40 @@ private struct HeroCarousel: View {
     private func slide(_ item: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: min(style.radius, 22))
         let meta = [item.year, item.group, item.rating.flatMap { $0 == "0" || $0.isEmpty ? nil : "★ " + $0 }].compactMap { $0 }
-        return ZStack {
-            palette.background2
-            AsyncImage(url: item.logo.flatMap(URL.init(string:))) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Color.clear
-            }
-            .opacity(0.45)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-            LinearGradient(colors: [palette.background, palette.background.opacity(0.6), .clear], startPoint: .leading, endPoint: .trailing)
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(item.kind == .movie ? "FILM" : "SÉRIE").font(.caption.bold()).foregroundStyle(palette.accent)
-                    Text(item.name).font(.title3.bold()).foregroundStyle(palette.text).lineLimit(2)
-                    if !meta.isEmpty {
-                        Text(meta.joined(separator: " · ")).font(.footnote).foregroundStyle(palette.textSecondary).lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    HStack(spacing: 8) {
-                        watchButton(item)
-                        if let route = route(for: item) {
-                            NavigationLink(value: route) { Label("Détails", systemImage: "info.circle") }
-                                .buttonStyle(NovaButtonStyle(prominent: false, compact: true))
-                        }
+        return HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text(item.kind == .movie ? "FILM" : "SÉRIE").font(.caption.bold()).foregroundStyle(palette.accent)
+                Text(item.name).font(.title3.bold()).foregroundStyle(palette.text).lineLimit(2)
+                if !meta.isEmpty {
+                    Text(meta.joined(separator: " · ")).font(.footnote).foregroundStyle(palette.textSecondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    watchButton(item)
+                    if let route = route(for: item) {
+                        NavigationLink(value: route) { Label("Détails", systemImage: "info.circle") }
+                            .buttonStyle(NovaButtonStyle(prominent: false, compact: true))
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                PosterImage(url: item.logo, title: item.name).frame(width: 104)
             }
-            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            PosterImage(url: item.logo, title: item.name).frame(width: 104)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Background only: a filled image must never widen the slide and push the text off screen.
+        .background {
+            ZStack {
+                palette.background2
+                AsyncImage(url: item.logo.flatMap(URL.init(string:))) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    Color.clear
+                }
+                .opacity(0.45)
+                LinearGradient(colors: [palette.background, palette.background.opacity(0.6), .clear], startPoint: .leading, endPoint: .trailing)
+            }
+            .clipped()
         }
         .clipShape(shape)
         .overlay(shape.stroke(palette.border, lineWidth: 1))

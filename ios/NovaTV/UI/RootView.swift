@@ -234,6 +234,7 @@ struct NovaLogo: View {
         HStack(spacing: 0) {
             NovaMark().frame(width: size * 2, height: size * 2)
             Text("NOVA").font(.system(size: size, weight: .bold)).tracking(size / 8).foregroundStyle(palette.text)
+                .lineLimit(1).fixedSize()
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("NOVA")
