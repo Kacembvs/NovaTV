@@ -992,6 +992,11 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
                     container.downloads.completedRequests(session.profileId, items.filter { it.kind != ContentKind.LIVE }.map { it.ref })
                 }.getOrDefault(emptyMap())
             }
+            val item = items[start]
+            val history = if (item.kind == ContentKind.LIVE) null else {
+                withContext(Dispatchers.IO) { container.db.libraryDao().history(session.profileId, item.ref) }
+            }
+            // From here on, no suspension: the player and the queue state change together.
             val p = exo ?: return@launch
             saveProgress()
             session = PlaybackQueue.Session(session.profileId, items, start)
@@ -1002,15 +1007,11 @@ class PlayerActivity : AppCompatActivity(), PlayerActions {
             cancelledNextFor = -1
             endHandledFor = -1
             nextUpJob?.cancel()
-            val item = items[start]
             var position = 0L
-            if (item.kind != ContentKind.LIVE) {
-                val history = withContext(Dispatchers.IO) { container.db.libraryDao().history(session.profileId, item.ref) }
-                if (history != null && history.positionMs > 10_000 &&
-                    (history.durationMs <= 0 || history.positionMs < history.durationMs * 0.95)
-                ) {
-                    position = history.positionMs
-                }
+            if (history != null && history.positionMs > 10_000 &&
+                (history.durationMs <= 0 || history.positionMs < history.durationMs * 0.95)
+            ) {
+                position = history.positionMs
             }
             ui.update { it.copy(error = null, nextUp = null, endScreen = null, resumeFromMs = position.takeIf { it > 0 }) }
             p.repeatMode = if (isLiveQueue) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF

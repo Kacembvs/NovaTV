@@ -152,6 +152,10 @@ final class PlayerController: ObservableObject {
     private var pendingSeek: Double?
     private var pendingSeekSince = Date.distantPast
     private var lastScrub = Date.distantPast
+    /// Episode whose "next episode" proposal was cancelled: not proposed again until another item plays.
+    private var countdownCancelledFor: Int?
+    /// The current item played to its end (end handling done once).
+    private var endReached = false
     private var audibleGroup: AVMediaSelectionGroup?
     private var legibleGroup: AVMediaSelectionGroup?
 
@@ -281,6 +285,7 @@ final class PlayerController: ObservableObject {
         saveProgress(force: true)
         // load() saves the current position again: it must not be written onto the new queue.
         time = 0
+        countdownCancelledFor = nil
         index = start
         items = newItems
         load(start, resume: true)
@@ -291,6 +296,8 @@ final class PlayerController: ObservableObject {
         saveProgress(force: true)
         countdownTask?.cancel()
         nextCountdown = nil
+        if newIndex != index { countdownCancelledFor = nil }
+        endReached = false
         error = nil
         finished = false
         index = newIndex
@@ -448,6 +455,7 @@ final class PlayerController: ObservableObject {
         case .vlc: tickVLC()
         }
         if Date().timeIntervalSince(lastSave) > 10 { saveProgress() }
+        checkNextUp()
     }
 
     private func tickApple() {
@@ -654,6 +662,8 @@ final class PlayerController: ObservableObject {
     }
 
     private func seek(to seconds: Double, precise: Bool) {
+        // Going back after the end: the end will be handled again (autoplay, end screen).
+        if duration <= 0 || seconds < duration - 2 { endReached = false }
         pendingSeek = seconds
         pendingSeekSince = Date()
         time = seconds
@@ -685,6 +695,8 @@ final class PlayerController: ObservableObject {
 
     func replay() {
         finished = false
+        endReached = false
+        countdownCancelledFor = nil
         restartFromBeginning()
         if engine == .vlc {
             if vlc.state == .ended || vlc.state == .stopped { load(index, resume: false, forceEngine: .vlc) } else { vlc.play() }
@@ -780,9 +792,11 @@ final class PlayerController: ObservableObject {
     }
 
     private func markFinishedIfNeeded() {
-        guard !isLive else { return }
+        guard !isLive, !endReached else { return }
         if duration > 0, time > duration * 0.9 {
             context.saveProgress(profileID: profile.id, item: current, position: duration, duration: duration)
+            // Moving on during the credits: smart downloads must still see the episode as watched.
+            downloads.episodeFinished(profile: profile, item: current, next: hasNext ? items[index + 1] : nil)
         }
     }
 
@@ -794,27 +808,55 @@ final class PlayerController: ObservableObject {
     }
 
     private func itemEnded() {
-        guard !isLive else { return }
+        guard !isLive, !endReached else { return }
+        endReached = true
         context.saveProgress(profileID: profile.id, item: current, position: duration, duration: duration)
         let nextItem = hasNext ? items[index + 1] : nil
         downloads.episodeFinished(profile: profile, item: current, next: nextItem)
         if sleep == .endOfItem {
+            countdownTask?.cancel()
+            nextCountdown = nil
             sleep = .off
             finished = true
             return
         }
-        guard settings.autoplayNext, current.kind == .episode, hasNext else {
+        guard settings.autoplayNext, current.kind == .episode, hasNext, countdownCancelledFor != index else {
             finished = true
             return
         }
-        nextCountdown = settings.countdownSeconds
+        // Usually already counting since X seconds before the end.
+        if nextCountdown == nil { startCountdown(seconds: settings.countdownSeconds) }
+    }
+
+    /// Like Android: proposes the next episode `countdownSeconds` before the end of the current one.
+    private func checkNextUp() {
+        guard !isLive, settings.autoplayNext, current.kind == .episode, hasNext, sleep != .endOfItem,
+              countdownCancelledFor != index, pendingSeek == nil, duration > 0, !finished, error == nil else { return }
+        let remaining = duration - time
+        if let left = nextCountdown {
+            // Seeked back well before the end: hide the proposal.
+            if remaining > Double(settings.countdownSeconds + 5) { countdownTask?.cancel(); nextCountdown = nil }
+            else if !endReached, left > Int(remaining.rounded(.up)) + 1 { nextCountdown = max(1, Int(remaining.rounded(.up))) }
+            return
+        }
+        if remaining > 0, remaining <= Double(settings.countdownSeconds), playing {
+            startCountdown(seconds: max(1, Int(remaining.rounded(.up))))
+        }
+    }
+
+    private func startCountdown(seconds: Int) {
+        countdownTask?.cancel()
+        nextCountdown = seconds
         countdownTask = Task { [weak self] in
             while let self, let left = self.nextCountdown, left > 0 {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard !Task.isCancelled else { return }
-                self.nextCountdown = left - 1
+                guard !Task.isCancelled, let current = self.nextCountdown, !self.finished else { return }
+                // Frozen while paused or during a call, as on Android; keeps going once the episode is over.
+                if (self.playing && !self.interrupted) || (self.endReached && !self.interrupted) {
+                    self.nextCountdown = current - 1
+                }
             }
-            guard !Task.isCancelled, let self, self.nextCountdown == 0 else { return }
+            guard !Task.isCancelled, let self, self.nextCountdown == 0, !self.finished else { return }
             self.next()
         }
     }
@@ -822,16 +864,25 @@ final class PlayerController: ObservableObject {
     func cancelCountdown() {
         countdownTask?.cancel()
         nextCountdown = nil
-        finished = true
+        countdownCancelledFor = index
+        // Cancelled during the credits: the episode keeps playing; end screen only once it is over.
+        if endReached || (duration > 0 && time >= duration - 1) { finished = true }
     }
 
     func setSleep(_ choice: SleepChoice) {
         sleepTask?.cancel()
         sleep = choice
+        // "End of episode" takes priority over a next-episode proposal already on screen.
+        if choice == .endOfItem {
+            countdownTask?.cancel()
+            nextCountdown = nil
+        }
         if case .minutes(let minutes) = choice {
             sleepTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(minutes) * 60 * 1_000_000_000)
                 guard !Task.isCancelled, let self else { return }
+                self.countdownTask?.cancel()
+                self.nextCountdown = nil
                 self.player.pause()
                 self.vlc.pause()
                 self.saveProgress(force: true)
